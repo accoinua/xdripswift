@@ -202,7 +202,7 @@ enum BluetoothPeripheralType: String, CaseIterable {
 
         case .SibionicsChineseType:
             guard SibionicsChineseIdentity.shortCode(from: transmitterId) != nil else {
-                return "Enter the 8-character code from the Chinese SIBIONICS GS1 label (or its full GS1 QR payload)."
+                return "Enter the 8-character sensor code or the full GS1 DataMatrix payload."
             }
             return nil
             
@@ -272,4 +272,3 @@ enum BluetoothPeripheralType: String, CaseIterable {
         }
     }
 }
-

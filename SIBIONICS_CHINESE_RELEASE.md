@@ -39,8 +39,20 @@ is not required to build the iOS application.
 ## Sensor setup
 
 In xDrip, add a Bluetooth peripheral of type **SIBIONICS GS1 Chinese**. Enter the
-8-character Chinese sensor code, or paste the complete GS1 QR payload. Keep the
-official SIBIONICS app disconnected from the sensor while xDrip is connecting.
+8-character connection code printed below the GS1 DataMatrix, or paste the
+complete GS1 DataMatrix payload. Example:
+
+`9MAE230B`
+
+The DataMatrix carries the GTIN, production and expiry dates, lot, and serial.
+For the photographed sensor its serial is `2605069MAE230BFN18`; the printed
+connection code is serial characters 7–14. It does not contain a literal BLE
+address, and normal setup must not require an Android device.
+
+Across the available labels, the serial layout is
+`<6-character lot core><8-character connection code><4-character suffix>`.
+The first four characters of the connection code match the suffix of the BLE
+advertised name, so xDrip uses them to select the intended sensor automatically.
 
 The sensor must be able to return a continuous one-minute history beginning at
 index 1 when no compatible algorithm snapshot exists. If an index gap is found,
@@ -56,15 +68,22 @@ polling is required; a heartbeat now explicitly triggers a Chinese GS1 request.
 - Kotlin/JVM reference versus the generated Kotlin/JavaScript exact-core output:
   3,153 generated samples, zero mismatches.
 - Snapshot/restore continuation through the same stream: zero mismatches.
-- Xcode project structure, source membership, resource membership, Core Data XML,
-  and the syntax of all newly added Swift files were checked on Windows.
-- A signed Xcode build and live Chinese sensor replay require macOS and real
-  hardware and have **not** been run in this environment.
+- GitHub Actions produced a signed TestFlight build, and an iPhone live test
+  confirmed FF30 connection, FF31 notifications, and successful FF32 writes.
+- The first live build sent zeroes in bytes where Juggluco inserts Android's BLE
+  address. The sensor only returned `AA 55 07` echo frames and no `AA 55 09`
+  glucose data. The QR does not expose the address. The next diagnostic build
+  records iOS advertisement/service data and reads standard Device Information
+  characteristics to locate the native iOS identity source without guessing.
+- A TestFlight crash report identified teardown in `stopPolling()` during
+  `deinit`; the weak-reference registration responsible for that crash has been
+  removed, but the fix still requires a live disconnect retest.
 
 The parity checks establish deterministic equivalence to the recovered managed
-source for the tested inputs. They do not constitute clinical validation or
-proof that every vendor edge case has been recovered. Do not use this experimental
-path as the sole basis for treatment decisions.
+source for the tested inputs. Until the native iOS request receives and processes
+real `AA 55 09` frames, direct sensor support remains experimental and
+must not be described as verified. The checks do not constitute clinical
+validation. Do not use this path as the sole basis for treatment decisions.
 
 ## Provenance
 

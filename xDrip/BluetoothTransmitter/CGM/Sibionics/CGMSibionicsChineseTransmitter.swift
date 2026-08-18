@@ -13,6 +13,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     private weak var cgmTransmitterDelegate: CGMTransmitterDelegate?
     private let shortCode: String
     private let sensitivity: Double?
+    private let sensorMacAddress: [UInt8]?
     private let defaults: UserDefaults
     private let stateLock = NSLock()
     private let log = OSLog(subsystem: ConstantsLog.subSystem, category: ConstantsLog.categoryBlueToothTransmitter)
@@ -23,6 +24,15 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     private var nextIndex: Int
     private var pollingTimer: Timer?
     private var didAnnounceSensor = false
+    private var didLogAdvertisement = false
+
+    private static let deviceInformationServiceUUID = CBUUID(string: "180A")
+    private static let readableDeviceInformationUUIDs: Set<CBUUID> = [
+        CBUUID(string: "2A23"), // System ID
+        CBUUID(string: "2A24"), // Model Number String
+        CBUUID(string: "2A25"), // Serial Number String
+        CBUUID(string: "2A26")  // Firmware Revision String
+    ]
 
     private var persistenceSuffix: String { shortCode.uppercased() }
     private var checkpointKey: String { "sibionics.v115g.checkpoint.\(persistenceSuffix)" }
@@ -39,6 +49,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         let resolvedShortCode = parsedCode ?? sensorCode.uppercased().filter { $0.isLetter || $0.isNumber }
         self.shortCode = resolvedShortCode
         self.sensitivity = parsedCode.flatMap { SibionicsChineseSensitivity.decode($0) }
+        self.sensorMacAddress = SibionicsChineseIdentity.macAddress(from: sensorCode)
         self.cgmTransmitterDelegate = cgmTransmitterDelegate
         self.defaults = defaults
         let savedCheckpoint = defaults.data(forKey: "sibionics.v115g.checkpoint.\(resolvedShortCode)")
@@ -49,19 +60,50 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         if let address = address {
             addressAndName = .alreadyConnectedBefore(address: address, name: name)
         } else {
-            // The QR-derived identity is not always the advertised local name.
-            // FF30 plus the Chinese AA55 response is the protocol discriminator.
-            addressAndName = .notYetConnected(expectedName: nil)
+            // The first four characters of the QR-derived connection code are
+            // the suffix of the advertised BLE name (for example 9MAE in
+            // LT26049MAE). This identifies the intended sensor without needing
+            // Android's BLE address and avoids connecting to another nearby GS1.
+            addressAndName = .notYetConnected(expectedName: String(resolvedShortCode.prefix(4)))
         }
 
         super.init(
             addressAndName: addressAndName,
             CBUUID_Advertisement: SibionicsChineseProtocol.serviceUUID,
-            servicesCBUUIDs: [CBUUID(string: SibionicsChineseProtocol.serviceUUID)],
+            servicesCBUUIDs: [
+                CBUUID(string: SibionicsChineseProtocol.serviceUUID),
+                Self.deviceInformationServiceUUID
+            ],
             CBUUID_ReceiveCharacteristic: SibionicsChineseProtocol.notifyUUID,
             CBUUID_WriteCharacteristic: SibionicsChineseProtocol.writeUUID,
             bluetoothTransmitterDelegate: bluetoothTransmitterDelegate
         )
+    }
+
+    override func centralManager(
+        _ central: CBCentralManager,
+        didDiscover peripheral: CBPeripheral,
+        advertisementData: [String: Any],
+        rssi RSSI: NSNumber
+    ) {
+        logAdvertisementOnce(peripheral: peripheral, advertisementData: advertisementData)
+        super.centralManager(central, didDiscover: peripheral, advertisementData: advertisementData, rssi: RSSI)
+    }
+
+    override func peripheral(
+        _ peripheral: CBPeripheral,
+        didDiscoverCharacteristicsFor service: CBService,
+        error: Error?
+    ) {
+        super.peripheral(peripheral, didDiscoverCharacteristicsFor: service, error: error)
+        guard error == nil,
+              service.uuid == Self.deviceInformationServiceUUID,
+              let characteristics = service.characteristics else { return }
+        for characteristic in characteristics
+        where Self.readableDeviceInformationUUIDs.contains(characteristic.uuid)
+            && characteristic.properties.contains(.read) {
+            peripheral.readValue(for: characteristic)
+        }
     }
 
     override func peripheral(
@@ -83,6 +125,20 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         error: Error?
     ) {
         super.peripheral(peripheral, didUpdateValueFor: characteristic, error: error)
+        if Self.readableDeviceInformationUUIDs.contains(characteristic.uuid) {
+            guard error == nil, let value = characteristic.value else { return }
+            let text = String(data: value, encoding: .utf8) ?? "<binary>"
+            trace(
+                "SIBIONICS Chinese Device Information %{public}@ hex=%{public}@ text=%{public}@",
+                log: log,
+                category: ConstantsLog.categoryBlueToothTransmitter,
+                type: .info,
+                characteristic.uuid.uuidString,
+                value.hexEncodedString(),
+                text
+            )
+            return
+        }
         guard error == nil,
               characteristic.uuid == CBUUID(string: SibionicsChineseProtocol.notifyUUID),
               let value = characteristic.value,
@@ -123,7 +179,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         let requestedIndex = nextIndex
         stateLock.unlock()
         _ = writeDataToPeripheral(
-            data: SibionicsChineseProtocol.dataRequest(nextIndex: requestedIndex),
+            data: SibionicsChineseProtocol.dataRequest(nextIndex: requestedIndex, macAddress: sensorMacAddress),
             type: .withResponse
         )
     }
@@ -147,11 +203,49 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     }
 
     private func stopPolling() {
-        let invalidate = { [weak self] in
-            self?.pollingTimer?.invalidate()
-            self?.pollingTimer = nil
+        // Do not create a weak reference to `self` here. This method is also
+        // called from deinit, where objc_initWeak aborts because the object is
+        // already being destroyed. Capture only the timer for deferred
+        // invalidation so teardown never retains or weak-registers `self`.
+        let timer = pollingTimer
+        pollingTimer = nil
+        if Thread.isMainThread {
+            timer?.invalidate()
+        } else {
+            DispatchQueue.main.async {
+                timer?.invalidate()
+            }
         }
-        if Thread.isMainThread { invalidate() } else { DispatchQueue.main.async(execute: invalidate) }
+    }
+
+    private func logAdvertisementOnce(peripheral: CBPeripheral, advertisementData: [String: Any]) {
+        guard !didLogAdvertisement else { return }
+        didLogAdvertisement = true
+
+        var fields = ["peripheralUUID=\(peripheral.identifier.uuidString)"]
+        if let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String {
+            fields.append("localName=\(localName)")
+        }
+        if let manufacturerData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data {
+            fields.append("manufacturerData=\(manufacturerData.hexEncodedString())")
+        }
+        if let serviceUUIDs = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] {
+            fields.append("serviceUUIDs=\(serviceUUIDs.map(\.uuidString).sorted().joined(separator: ","))")
+        }
+        if let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data] {
+            let values = serviceData
+                .map { "\($0.key.uuidString)=\($0.value.hexEncodedString())" }
+                .sorted()
+                .joined(separator: ",")
+            fields.append("serviceData=\(values)")
+        }
+        trace(
+            "SIBIONICS Chinese advertisement: %{public}@",
+            log: log,
+            category: ConstantsLog.categoryBlueToothTransmitter,
+            type: .info,
+            fields.joined(separator: " ")
+        )
     }
 
     private func drainReceiveBuffer() {
@@ -329,4 +423,5 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
             self?.bluetoothTransmitterDelegate?.error(message: message)
         }
     }
+
 }

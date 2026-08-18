@@ -24,7 +24,7 @@ enum SibionicsChineseProtocol {
         }
     }
 
-    static func dataRequest(nextIndex: Int) -> Data {
+    static func dataRequest(nextIndex: Int, macAddress: [UInt8]?) -> Data {
         var packet = [UInt8](repeating: 0, count: 20)
         let requestedIndex = min(max(nextIndex, 1), 0xffff)
         packet[0] = 0xaa
@@ -32,7 +32,16 @@ enum SibionicsChineseProtocol {
         packet[2] = 0x07
         packet[3] = UInt8(truncatingIfNeeded: requestedIndex)
         packet[4] = UInt8(truncatingIfNeeded: requestedIndex >> 8)
-        // iOS does not expose the BLE MAC. Chinese firmware accepts six zero bytes.
+        // Juggluco puts the Android BLE address here in reverse byte order.
+        // CoreBluetooth does not expose that address. Keep an optional manual
+        // value for protocol research, but never require Android during normal
+        // sensor setup. Until the native iOS identity source is confirmed, a
+        // missing value deliberately remains zero rather than being guessed.
+        if let macAddress = macAddress, macAddress.count == 6 {
+            for index in 0..<6 {
+                packet[5 + index] = macAddress[5 - index]
+            }
+        }
         packet[19] = checksum(packet.dropLast())
         return Data(packet)
     }
@@ -79,7 +88,8 @@ enum SibionicsChineseProtocol {
 enum SibionicsChineseIdentity {
     static func shortCode(from input: String?) -> String? {
         guard let input = input else { return nil }
-        var framed = input.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let identity = input.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? input
+        var framed = identity.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if framed.hasPrefix("]D2") { framed.removeFirst(3) }
         let payload = framed.filter { $0.isLetter || $0.isNumber || $0 == "\u{001D}" }
         let normalized = payload.filter { $0.isLetter || $0.isNumber }
@@ -108,6 +118,28 @@ enum SibionicsChineseIdentity {
         }
         let short = String(compact.suffix(11).prefix(8))
         return SibionicsChineseSensitivity.decode(short) == nil ? nil : short
+    }
+
+    /// Reads the explicit BLE address from `sensor-code|AA:BB:CC:DD:EE:FF`.
+    /// We intentionally do not guess a MAC from GS1 digits or CoreBluetooth's
+    /// peripheral UUID; neither is the Bluetooth device address.
+    static func macAddress(from input: String?) -> [UInt8]? {
+        guard let input = input,
+              let separator = input.lastIndex(of: "|") else { return nil }
+        let rawAddress = input[input.index(after: separator)...]
+        let compact = rawAddress.filter { $0.isHexDigit }
+        guard compact.count == 12 else { return nil }
+
+        var result: [UInt8] = []
+        result.reserveCapacity(6)
+        var cursor = compact.startIndex
+        for _ in 0..<6 {
+            let end = compact.index(cursor, offsetBy: 2)
+            guard let byte = UInt8(compact[cursor..<end], radix: 16) else { return nil }
+            result.append(byte)
+            cursor = end
+        }
+        return result
     }
 }
 
