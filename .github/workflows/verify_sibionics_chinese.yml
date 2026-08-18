@@ -91,6 +91,19 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Report Xcode errors
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f "$BUILD_LOG" ]; then
+            # Surface compiler diagnostics through the public Check Run API;
+            # downloading Actions artifacts otherwise requires authentication.
+            grep -E '(^|[[:space:]])(error:|fatal error:)' "$BUILD_LOG" \
+              | tail -n 100 \
+              | sed 's/^/::error::/' \
+              || true
+          fi
+
       - name: Upload Xcode build log
         if: always()
         uses: actions/upload-artifact@v6
