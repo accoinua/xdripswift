@@ -62,6 +62,8 @@ Chinese GS1 is request/response based. xDrip polls every 60 seconds while it is
 running. Because iOS may suspend ordinary timers in the background, configure
 one of xDrip's supported **HeartBeat** peripherals if uninterrupted background
 polling is required; a heartbeat now explicitly triggers a Chinese GS1 request.
+The lifetime display uses the approximately 24-day extended Chinese operating
+window rather than the 14-day vendor-rated duration.
 
 ## Verification status
 

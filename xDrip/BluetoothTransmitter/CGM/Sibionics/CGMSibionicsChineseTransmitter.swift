@@ -189,7 +189,11 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     func getCBUUID_Receive() -> String { SibionicsChineseProtocol.notifyUUID }
     func isWebOOPEnabled() -> Bool { true }
     func nonWebOOPAllowed() -> Bool { false }
-    func maxSensorAgeInDays() -> Double? { 14 }
+    // The rated Chinese GS1 lifetime is 14 days, but its observed extended
+    // AA55 operating window is approximately 24 days (572 h minus 19 min).
+    // xDrip uses this value for the lifetime/progress display; it must reflect
+    // the usable Chinese window rather than showing the sensor as expired.
+    func maxSensorAgeInDays() -> Double? { 24 }
     func needsSensorStartTime() -> Bool { false }
 
     private func startPolling() {
