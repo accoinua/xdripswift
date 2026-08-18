@@ -32,6 +32,178 @@ private enum WebOOPSettings: Int, CaseIterable {
     case webOOPEnabled = 0
 }
 
+/// Camera reader used only while adding a Chinese SIBIONICS GS1 sensor. Keeping
+/// it in this source file avoids adding another project-file reference to the
+/// storyboard-based target.
+private final class SibionicsDataMatrixScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var onCode: ((String) -> Void)?
+
+    private let captureSession = AVCaptureSession()
+    private let captureQueue = DispatchQueue(label: "com.xdrip4ios.sibionics-code-scanner")
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var isConfigured = false
+    private var didFinish = false
+    private var didRequestCameraSetup = false
+
+    private let statusLabel: UILabel = {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.65)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.font = .preferredFont(forTextStyle: .body)
+        label.text = "Point the camera at the GS1 DataMatrix on the sensor box."
+        return label
+    }()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Scan SIBIONICS code"
+        view.backgroundColor = .black
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .cancel,
+            target: self,
+            action: #selector(cancelScanning)
+        )
+        view.addSubview(statusLabel)
+        NSLayoutConstraint.activate([
+            statusLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            statusLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            statusLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24)
+        ])
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !didRequestCameraSetup else { return }
+        didRequestCameraSetup = true
+        requestCameraAccessAndConfigure()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopCaptureSession()
+    }
+
+    private func requestCameraAccessAndConfigure() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            configureCaptureSession()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        self?.configureCaptureSession()
+                    } else {
+                        self?.showCameraUnavailable(message: "Camera access is required to scan the GS1 DataMatrix.")
+                    }
+                }
+            }
+        default:
+            showCameraUnavailable(message: "Allow camera access in iPhone Settings, or enter the code manually.")
+        }
+    }
+
+    private func configureCaptureSession() {
+        guard !isConfigured else { return }
+        guard let camera = AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: camera),
+              captureSession.canAddInput(input) else {
+            showCameraUnavailable(message: "The camera could not be opened. Enter the code manually instead.")
+            return
+        }
+
+        let metadataOutput = AVCaptureMetadataOutput()
+        guard captureSession.canAddOutput(metadataOutput) else {
+            showCameraUnavailable(message: "Barcode scanning is unavailable on this device.")
+            return
+        }
+
+        captureSession.beginConfiguration()
+        captureSession.addInput(input)
+        captureSession.addOutput(metadataOutput)
+        metadataOutput.setMetadataObjectsDelegate(self, queue: .main)
+        let wantedTypes: [AVMetadataObject.ObjectType] = [.dataMatrix, .qr]
+        metadataOutput.metadataObjectTypes = wantedTypes.filter {
+            metadataOutput.availableMetadataObjectTypes.contains($0)
+        }
+        captureSession.commitConfiguration()
+
+        guard !metadataOutput.metadataObjectTypes.isEmpty else {
+            showCameraUnavailable(message: "DataMatrix scanning is unavailable on this device.")
+            return
+        }
+
+        let previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+        previewLayer.videoGravity = .resizeAspectFill
+        previewLayer.frame = view.bounds
+        view.layer.insertSublayer(previewLayer, at: 0)
+        self.previewLayer = previewLayer
+        isConfigured = true
+        captureQueue.async { [captureSession] in
+            captureSession.startRunning()
+        }
+    }
+
+    private func stopCaptureSession() {
+        captureQueue.async { [captureSession] in
+            if captureSession.isRunning {
+                captureSession.stopRunning()
+            }
+        }
+    }
+
+    private func showCameraUnavailable(message: String) {
+        statusLabel.text = message
+        let alert = UIAlertController(title: "Camera unavailable", message: message, preferredStyle: .alert)
+        if AVCaptureDevice.authorizationStatus(for: .video) == .denied,
+           let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+            alert.addAction(UIAlertAction(title: "Settings", style: .default) { _ in
+                UIApplication.shared.open(settingsURL)
+            })
+        }
+        alert.addAction(UIAlertAction(title: Texts_Common.Cancel, style: .cancel) { [weak self] _ in
+            self?.dismiss(animated: true)
+        })
+        present(alert, animated: true)
+    }
+
+    @objc private func cancelScanning() {
+        stopCaptureSession()
+        dismiss(animated: true)
+    }
+
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        guard !didFinish else { return }
+        for object in metadataObjects {
+            guard let readableCode = object as? AVMetadataMachineReadableCodeObject,
+                  let payload = readableCode.stringValue else { continue }
+            guard let shortCode = SibionicsChineseIdentity.shortCode(from: payload) else {
+                statusLabel.text = "This is not a supported Chinese SIBIONICS GS1 code."
+                continue
+            }
+
+            didFinish = true
+            stopCaptureSession()
+            let completion = onCode
+            dismiss(animated: true) {
+                completion?(shortCode)
+            }
+            return
+        }
+    }
+}
+
 fileprivate enum NonFixedCalibrationSlopesSettings: Int, CaseIterable {
     /// is non fixed slope enabled or not
     case nonFixedSlopeEnabled = 0
@@ -812,9 +984,41 @@ class BluetoothPeripheralViewController: UIViewController {
     }
     
     private func requestTransmitterId() {
-        // unwrap bluetoothPeripheralManager
-        guard let bluetoothPeripheralManager = bluetoothPeripheralManager else { return }
-        
+        if expectedBluetoothPeripheralType == .SibionicsChineseType {
+            let chooser = UIAlertController(
+                title: "Chinese SIBIONICS GS1 sensor code",
+                message: "Scan the GS1 DataMatrix on the box or enter the 8-character connection code printed below it.",
+                preferredStyle: .actionSheet
+            )
+            chooser.addAction(UIAlertAction(title: "Scan GS1 DataMatrix", style: .default) { [weak self] _ in
+                self?.presentSibionicsCodeScanner()
+            })
+            chooser.addAction(UIAlertAction(title: "Enter code manually", style: .default) { [weak self] _ in
+                self?.requestTransmitterIdManually()
+            })
+            chooser.addAction(UIAlertAction(title: Texts_Common.Cancel, style: .cancel))
+            if let popover = chooser.popoverPresentationController {
+                popover.sourceView = view
+                popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+            }
+            present(chooser, animated: true)
+            return
+        }
+
+        requestTransmitterIdManually()
+    }
+
+    private func presentSibionicsCodeScanner() {
+        let scanner = SibionicsDataMatrixScannerViewController()
+        scanner.onCode = { [weak self] shortCode in
+            self?.applyTransmitterId(shortCode)
+        }
+        let navigationController = UINavigationController(rootViewController: scanner)
+        navigationController.modalPresentationStyle = .fullScreen
+        present(navigationController, animated: true)
+    }
+
+    private func requestTransmitterIdManually() {
         // set default text strings. These will be overwritten if needed.
         var transmitterIdTitleText = Texts_SettingsView.labelTransmitterId
         var transmitterIdMessageText = Texts_SettingsView.labelGiveTransmitterId
@@ -839,23 +1043,32 @@ class BluetoothPeripheralViewController: UIViewController {
         }
         
         SettingsViewUtilities.runSelectedRowAction(selectedRowAction: SettingsSelectedRowAction.askText(title: (transmitterIdTitleText == "" ? nil : transmitterIdTitleText), message: transmitterIdMessageText, keyboardType: UIKeyboardType.alphabet, text: transmitterIdTempValue, placeHolder: placeHolder, actionTitle: nil, cancelTitle: nil, actionHandler: { (transmitterId: String) in
-            
-            // convert to uppercase
-            let transmitterIdUpper = transmitterId.uppercased().toNilIfLength0()
-            
-            self.transmitterIdTempValue = transmitterIdUpper ?? ConstantsBluetoothPairing.dummyDexcomG7TypeTransmitterId
-            
-            // reload the specific row in the table - this will always be extraRow4 for the transmitter ID
-            self.tableView.reloadRows(at: [IndexPath(row: Setting.transmitterExtraRow4.rawValue, section: 0)], with: .none)
-            
-            // as transmitter id has been set (or set to nil), connect button label text must change
-            _ = BluetoothPeripheralViewController.setConnectButtonLabelTextAndGetStatusDetailedText(bluetoothPeripheral: self.bluetoothPeripheral, isScanning: self.isScanning, nfcScanNeeded: self.nfcScanNeeded, nfcScanSuccessful: self.nfcScanSuccessful, connectButtonOutlet: self.connectButtonOutlet, expectedBluetoothPeripheralType: self.expectedBluetoothPeripheralType, transmitterId: transmitterIdUpper, bluetoothPeripheralManager: bluetoothPeripheralManager as! BluetoothPeripheralManager)
-            
+            self.applyTransmitterId(transmitterId)
         }, cancelHandler: nil, inputValidator: { transmitterId in
             
             self.expectedBluetoothPeripheralType?.validateTransmitterId(transmitterId: transmitterId)
             
         }), forRowWithIndex: Setting.transmitterExtraRow4.rawValue, forSectionWithIndex: generalSettingSectionNumber, withSettingsViewModel: nil, tableView: tableView, forUIViewController: self)
+    }
+
+    private func applyTransmitterId(_ transmitterId: String) {
+        guard let bluetoothPeripheralManager = bluetoothPeripheralManager else { return }
+        let transmitterIdUpper = transmitterId.uppercased().toNilIfLength0()
+        transmitterIdTempValue = transmitterIdUpper ?? ConstantsBluetoothPairing.dummyDexcomG7TypeTransmitterId
+        tableView.reloadRows(
+            at: [IndexPath(row: Setting.transmitterExtraRow4.rawValue, section: generalSettingSectionNumber)],
+            with: .none
+        )
+        _ = BluetoothPeripheralViewController.setConnectButtonLabelTextAndGetStatusDetailedText(
+            bluetoothPeripheral: bluetoothPeripheral,
+            isScanning: isScanning,
+            nfcScanNeeded: nfcScanNeeded,
+            nfcScanSuccessful: nfcScanSuccessful,
+            connectButtonOutlet: connectButtonOutlet,
+            expectedBluetoothPeripheralType: expectedBluetoothPeripheralType,
+            transmitterId: transmitterIdUpper,
+            bluetoothPeripheralManager: bluetoothPeripheralManager as! BluetoothPeripheralManager
+        )
     }
     
     /// dismiss alert screen that shows info after clicking start scanning button (also used for nfc scan success/fail alerts)

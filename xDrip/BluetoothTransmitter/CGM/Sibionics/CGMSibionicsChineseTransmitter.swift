@@ -13,7 +13,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     private weak var cgmTransmitterDelegate: CGMTransmitterDelegate?
     private let shortCode: String
     private let sensitivity: Double?
-    private let sensorMacAddress: [UInt8]?
+    private var sensorMacAddress: [UInt8]?
     private let defaults: UserDefaults
     private let stateLock = NSLock()
     private let log = OSLog(subsystem: ConstantsLog.subSystem, category: ConstantsLog.categoryBlueToothTransmitter)
@@ -25,6 +25,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     private var pollingTimer: Timer?
     private var didAnnounceSensor = false
     private var didLogAdvertisement = false
+    private var didLogWaitingForMacAddress = false
 
     private static let deviceInformationServiceUUID = CBUUID(string: "180A")
     private static let readableDeviceInformationUUIDs: Set<CBUUID> = [
@@ -36,6 +37,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
 
     private var persistenceSuffix: String { shortCode.uppercased() }
     private var checkpointKey: String { "sibionics.v115g.checkpoint.\(persistenceSuffix)" }
+    private var macAddressKey: String { "sibionics.v115g.mac.\(persistenceSuffix)" }
 
     init(
         address: String?,
@@ -47,9 +49,12 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     ) {
         let parsedCode = SibionicsChineseIdentity.shortCode(from: sensorCode)
         let resolvedShortCode = parsedCode ?? sensorCode.uppercased().filter { $0.isLetter || $0.isNumber }
+        let persistedMacAddress = defaults.data(forKey: "sibionics.v115g.mac.\(resolvedShortCode.uppercased())")
+            .map(Array.init)
+            .flatMap { Self.isValidMacAddress($0) ? $0 : nil }
         self.shortCode = resolvedShortCode
         self.sensitivity = parsedCode.flatMap { SibionicsChineseSensitivity.decode($0) }
-        self.sensorMacAddress = SibionicsChineseIdentity.macAddress(from: sensorCode)
+        self.sensorMacAddress = SibionicsChineseIdentity.macAddress(from: sensorCode) ?? persistedMacAddress
         self.cgmTransmitterDelegate = cgmTransmitterDelegate
         self.defaults = defaults
         let savedCheckpoint = defaults.data(forKey: "sibionics.v115g.checkpoint.\(resolvedShortCode)")
@@ -137,6 +142,9 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
                 value.hexEncodedString(),
                 text
             )
+            if characteristic.uuid == CBUUID(string: "2A25") {
+                updateMacAddress(fromSerialNumberValue: value)
+            }
             return
         }
         guard error == nil,
@@ -177,9 +185,26 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     func requestNewReading() {
         stateLock.lock()
         let requestedIndex = nextIndex
+        let macAddress = sensorMacAddress
+        let shouldLogWaiting = macAddress == nil && !didLogWaitingForMacAddress
+        if shouldLogWaiting {
+            didLogWaitingForMacAddress = true
+        }
         stateLock.unlock()
+
+        guard let macAddress = macAddress else {
+            if shouldLogWaiting {
+                trace(
+                    "SIBIONICS Chinese: waiting for the sensor MAC in Device Information 2A25",
+                    log: log,
+                    category: ConstantsLog.categoryBlueToothTransmitter,
+                    type: .info
+                )
+            }
+            return
+        }
         _ = writeDataToPeripheral(
-            data: SibionicsChineseProtocol.dataRequest(nextIndex: requestedIndex, macAddress: sensorMacAddress),
+            data: SibionicsChineseProtocol.dataRequest(nextIndex: requestedIndex, macAddress: macAddress),
             type: .withResponse
         )
     }
@@ -250,6 +275,44 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
             type: .info,
             fields.joined(separator: " ")
         )
+    }
+
+    /// The Chinese GS1 exposes its six-byte BLE address as the value of the
+    /// Device Information Serial Number characteristic (2A25). The on-air
+    /// AA5507 request uses those bytes in the opposite order, as confirmed by
+    /// captures from the same sensor on Android and iOS.
+    private func updateMacAddress(fromSerialNumberValue value: Data) {
+        let serialBytes = [UInt8](value)
+        guard serialBytes.count == 6 else { return }
+        let discoveredMacAddress = Array(serialBytes.reversed())
+        guard Self.isValidMacAddress(discoveredMacAddress) else { return }
+
+        stateLock.lock()
+        let previouslyMissing = sensorMacAddress == nil
+        let didChange = sensorMacAddress != discoveredMacAddress
+        sensorMacAddress = discoveredMacAddress
+        didLogWaitingForMacAddress = false
+        stateLock.unlock()
+
+        defaults.set(Data(discoveredMacAddress), forKey: macAddressKey)
+        if didChange {
+            trace(
+                "SIBIONICS Chinese: obtained sensor MAC %{public}@ from Device Information 2A25",
+                log: log,
+                category: ConstantsLog.categoryBlueToothTransmitter,
+                type: .info,
+                discoveredMacAddress.map { String(format: "%02X", $0) }.joined(separator: ":")
+            )
+        }
+        if previouslyMissing || didChange {
+            requestNewReading()
+        }
+    }
+
+    private static func isValidMacAddress(_ address: [UInt8]) -> Bool {
+        address.count == 6
+            && !address.allSatisfy { $0 == 0x00 }
+            && !address.allSatisfy { $0 == 0xff }
     }
 
     private func drainReceiveBuffer() {

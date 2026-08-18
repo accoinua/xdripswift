@@ -24,7 +24,7 @@ enum SibionicsChineseProtocol {
         }
     }
 
-    static func dataRequest(nextIndex: Int, macAddress: [UInt8]?) -> Data {
+    static func dataRequest(nextIndex: Int, macAddress: [UInt8]) -> Data {
         var packet = [UInt8](repeating: 0, count: 20)
         let requestedIndex = min(max(nextIndex, 1), 0xffff)
         packet[0] = 0xaa
@@ -32,12 +32,9 @@ enum SibionicsChineseProtocol {
         packet[2] = 0x07
         packet[3] = UInt8(truncatingIfNeeded: requestedIndex)
         packet[4] = UInt8(truncatingIfNeeded: requestedIndex >> 8)
-        // Juggluco puts the Android BLE address here in reverse byte order.
-        // CoreBluetooth does not expose that address. Keep an optional manual
-        // value for protocol research, but never require Android during normal
-        // sensor setup. Until the native iOS identity source is confirmed, a
-        // missing value deliberately remains zero rather than being guessed.
-        if let macAddress = macAddress, macAddress.count == 6 {
+        // The sensor returns its six-byte BLE address in Device Information
+        // characteristic 2A25. AA5507 expects that address in reverse order.
+        if macAddress.count == 6 {
             for index in 0..<6 {
                 packet[5 + index] = macAddress[5 - index]
             }
