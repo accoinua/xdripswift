@@ -22,12 +22,15 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     private var algorithmLoadFailed = false
     private var receiveBuffer = Data()
     private var nextIndex: Int
-    private var pollingTimer: Timer?
+    private var streamWatchdogTimer: Timer?
     private var didAnnounceSensor = false
     private var didLogAdvertisement = false
     private var didLogWaitingForMacAddress = false
 
     private static let deviceInformationServiceUUID = CBUUID(string: "180A")
+    private static let expectedLiveInterval: TimeInterval = 60
+    private static let streamWatchdogGrace: TimeInterval = 5
+    private static let recoveryResponseTimeout: TimeInterval = 10
     private static let readableDeviceInformationUUIDs: Set<CBUUID> = [
         CBUUID(string: "2A23"), // System ID
         CBUUID(string: "2A24"), // Model Number String
@@ -120,8 +123,11 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         guard error == nil,
               characteristic.uuid == CBUUID(string: SibionicsChineseProtocol.notifyUUID),
               characteristic.isNotifying else { return }
-        startPolling()
         requestNewReading()
+        armStreamWatchdog(
+            after: Self.expectedLiveInterval + Self.streamWatchdogGrace,
+            recoveryRequestAlreadySent: false
+        )
     }
 
     override func peripheral(
@@ -168,18 +174,18 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         didDisconnectPeripheral peripheral: CBPeripheral,
         error: Error?
     ) {
-        stopPolling()
+        stopStreamWatchdog()
         receiveBuffer.removeAll(keepingCapacity: true)
         super.centralManager(central, didDisconnectPeripheral: peripheral, error: error)
     }
 
     override func prepareForRelease() {
-        stopPolling()
+        stopStreamWatchdog()
         super.prepareForRelease()
     }
 
     deinit {
-        stopPolling()
+        stopStreamWatchdog()
     }
 
     func requestNewReading() {
@@ -221,23 +227,55 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     func maxSensorAgeInDays() -> Double? { 24 }
     func needsSensorStartTime() -> Bool { false }
 
-    private func startPolling() {
+    private func armStreamWatchdog(after interval: TimeInterval, recoveryRequestAlreadySent: Bool) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.pollingTimer?.invalidate()
-            self.pollingTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-                self?.requestNewReading()
+            self.streamWatchdogTimer?.invalidate()
+            let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+                self?.streamWatchdogExpired(recoveryRequestAlreadySent: recoveryRequestAlreadySent)
             }
+            timer.tolerance = 1
+            self.streamWatchdogTimer = timer
         }
     }
 
-    private func stopPolling() {
+    private func streamWatchdogExpired(recoveryRequestAlreadySent: Bool) {
+        streamWatchdogTimer = nil
+        if recoveryRequestAlreadySent {
+            trace(
+                "SIBIONICS Chinese: no data after recovery request; reconnecting immediately",
+                log: log,
+                category: ConstantsLog.categoryBlueToothTransmitter,
+                type: .error
+            )
+            disconnect()
+            return
+        }
+
+        trace(
+            "SIBIONICS Chinese: live stream missed its expected interval; requesting backfill",
+            log: log,
+            category: ConstantsLog.categoryBlueToothTransmitter,
+            type: .info
+        )
+        requestNewReading()
+        armStreamWatchdog(after: Self.recoveryResponseTimeout, recoveryRequestAlreadySent: true)
+    }
+
+    private func noteValidDataFrame() {
+        armStreamWatchdog(
+            after: Self.expectedLiveInterval + Self.streamWatchdogGrace,
+            recoveryRequestAlreadySent: false
+        )
+    }
+
+    private func stopStreamWatchdog() {
         // Do not create a weak reference to `self` here. This method is also
         // called from deinit, where objc_initWeak aborts because the object is
         // already being destroyed. Capture only the timer for deferred
         // invalidation so teardown never retains or weak-registers `self`.
-        let timer = pollingTimer
-        pollingTimer = nil
+        let timer = streamWatchdogTimer
+        streamWatchdogTimer = nil
         if Thread.isMainThread {
             timer?.invalidate()
         } else {
@@ -330,6 +368,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
                 trace("SIBIONICS Chinese: rejected malformed/checksum frame", log: log, category: ConstantsLog.categoryBlueToothTransmitter, type: .error)
                 continue
             }
+            noteValidDataFrame()
             process(entries: entries, receivedAt: Date())
         }
     }

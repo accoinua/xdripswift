@@ -4,6 +4,9 @@ enum SibionicsChineseProtocol {
     static let serviceUUID = "FF30"
     static let notifyUUID = "FF31"
     static let writeUUID = "FF32"
+    // FF31 always carries ten 14-byte slots, even when only the first slot is
+    // live. Byte 3 says how many slots are valid; unused slots are zero-filled.
+    static let dataFrameLength = 5 + 10 * 14
 
     struct Entry {
         let index: Int
@@ -45,12 +48,14 @@ enum SibionicsChineseProtocol {
 
     static func parseDataFrame(_ frame: Data) -> [Entry]? {
         let bytes = [UInt8](frame)
-        guard bytes.count >= 5, bytes[0] == 0xaa, bytes[1] == 0x55, bytes[2] == 0x09 else {
+        guard bytes.count == dataFrameLength,
+              bytes[0] == 0xaa,
+              bytes[1] == 0x55,
+              bytes[2] == 0x09 else {
             return nil
         }
         let count = Int(bytes[3])
-        let expectedSize = 5 + count * 14
-        guard bytes.count == expectedSize, bytes.last == checksum(bytes.dropLast()) else { return nil }
+        guard count <= 10, bytes.last == checksum(bytes.dropLast()) else { return nil }
         return (0..<count).map { item in
             let offset = 4 + item * 14
             return Entry(
@@ -66,10 +71,12 @@ enum SibionicsChineseProtocol {
     }
 
     static func expectedFrameLength(in buffer: Data) -> Int? {
-        let bytes = [UInt8](buffer.prefix(4))
-        guard bytes.count >= 3, bytes[0] == 0xaa, bytes[1] == 0x55 else { return nil }
-        guard bytes[2] == 0x09, bytes.count == 4 else { return nil }
-        return 5 + Int(bytes[3]) * 14
+        let bytes = [UInt8](buffer.prefix(3))
+        guard bytes.count == 3,
+              bytes[0] == 0xaa,
+              bytes[1] == 0x55,
+              bytes[2] == 0x09 else { return nil }
+        return dataFrameLength
     }
 
     private static func checksum<S: Sequence>(_ bytes: S) -> UInt8 where S.Element == UInt8 {
