@@ -21,8 +21,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     env:
-      DERIVED_DATA: ${{ runner.temp }}/xdrip-derived-data
-      BUILD_LOG: ${{ runner.temp }}/xcodebuild.log
+      # The `runner` context is unavailable at job-level `env`. The workspace
+      # context is valid here and the checkout is disposable on the hosted Mac.
+      DERIVED_DATA: ${{ github.workspace }}/xdrip-derived-data
+      BUILD_LOG: ${{ github.workspace }}/xcodebuild.log
 
     steps:
       - name: Checkout repository
@@ -94,6 +96,6 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: xdrip-sibionics-chinese-build-log
-          path: ${{ runner.temp }}/xcodebuild.log
+          path: ${{ env.BUILD_LOG }}
           if-no-files-found: warn
           retention-days: 14
