@@ -96,6 +96,9 @@ enum CGMTransmitterType:String, CaseIterable {
     
     /// Libre2
     case Libre2 = "Libre2"
+
+    /// Chinese SIBIONICS GS1 using the stock v1.1.5G pipeline
+    case sibionicsChinese = "SIBIONICS GS1 Chinese"
     
     /// what sensorType does this CGMTransmitter type support
     func sensorType() -> CGMSensorType {
@@ -105,7 +108,7 @@ enum CGMTransmitterType:String, CaseIterable {
         case .dexcom, .dexcomG7:
             return .Dexcom
             
-        case .miaomiao, .Bubble, .Libre2:
+        case .miaomiao, .Bubble, .Libre2, .sibionicsChinese:
             return .Libre
             
         }
@@ -134,6 +137,9 @@ enum CGMTransmitterType:String, CaseIterable {
             
         case .dexcomG7:
             return true
+
+        case .sibionicsChinese:
+            return true
             
         }
     }
@@ -150,6 +156,9 @@ enum CGMTransmitterType:String, CaseIterable {
             
         case .miaomiao, .Bubble, .Libre2:
             return true
+
+        case .sibionicsChinese:
+            return false
             
         case .dexcomG7:
             return false
@@ -162,6 +171,10 @@ enum CGMTransmitterType:String, CaseIterable {
         switch self {
             
         case .dexcom:
+            return ConstantsDefaultAlertLevels.defaultBatteryAlertLevelDexcomG5
+
+        case .sibionicsChinese:
+            // No verified battery characteristic is used by the Chinese AA55 path.
             return ConstantsDefaultAlertLevels.defaultBatteryAlertLevelDexcomG5
             
         case .miaomiao:
@@ -198,6 +211,9 @@ enum CGMTransmitterType:String, CaseIterable {
             
         case .dexcomG7:
             // we don't use this
+            return ""
+
+        case .sibionicsChinese:
             return ""
             
         }
@@ -251,6 +267,9 @@ enum CGMTransmitterType:String, CaseIterable {
             } else {
                 return "Libre 2 EU"
             }
+
+        case .sibionicsChinese:
+            return self.rawValue
             
         default:
             return self.rawValue

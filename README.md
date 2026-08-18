@@ -1,5 +1,7 @@
 Project in development.
 
+Chinese SIBIONICS GS1 fork build: [GitHub Actions guide](GITHUB_ACTIONS_BUILD_UK.md)
+
 Documentation available on https://xdrip4ios.readthedocs.io/en/latest/
 
 for info, send an email to xdrip@proximus.be
@@ -15,6 +17,7 @@ Current Status :
     - Droplet 1
     - Atom
     - Libre 2
+    - SIBIONICS GS1 Chinese (direct BLE, stock v1.1.5G algorithm; experimental)
 - 6 hour graph with readings
 - Alerting
 - Upload to Nightscout

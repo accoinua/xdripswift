@@ -336,6 +336,13 @@ extension BluetoothPeripheralManager: BluetoothTransmitterDelegate {
     // to confirm to protocol BluetoothPeripheralDelegate
     func heartBeat() {
         // bluetooth peripheral's heart is beating
+        // Chinese SIBIONICS is request/response based. A configured heartbeat
+        // provides a background wake on iOS, where a 60-second Timer alone is
+        // not guaranteed to run while the app is suspended.
+        if getCGMTransmitter()?.cgmTransmitterType() == .sibionicsChinese {
+            requestNewReading()
+        }
+
         // if a heartBeat function is set, then call it
         if let heartBeatFunction = heartBeatFunction {
             heartBeatFunction()
@@ -343,4 +350,3 @@ extension BluetoothPeripheralManager: BluetoothTransmitterDelegate {
     }
 
 }
-

@@ -616,6 +616,12 @@ class Trace {
                             traceInfo.appendStringAndNewLine("    Smooth Libre readings: " + UserDefaults.standard.smoothLibreValues.description)
                             
                         }
+
+                    case .SibionicsChineseType:
+                        if blePeripheral.sibionics != nil {
+                            traceInfo.appendStringAndNewLine("        Type: " + bluetoothPeripheralType.rawValue)
+                            traceInfo.appendStringAndNewLine("        Algorithm: Chinese stock v1.1.5G")
+                        }
                         
                     case .Libre3HeartBeatType:
                         if blePeripheral.libre2heartbeat != nil {

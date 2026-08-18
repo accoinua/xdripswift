@@ -1953,6 +1953,10 @@ final class RootViewController: UIViewController, ObservableObject {
         case .dexcomG7:
             // received values are already calibrated
             calibrator = NoCalibrator()
+
+        case .sibionicsChinese:
+            // The embedded Chinese v1.1.5G stock pipeline returns calibrated values.
+            calibrator = NoCalibrator()
             
         case .miaomiao, .Bubble, .Libre2:
             if cgmTransmitter.isWebOOPEnabled() {

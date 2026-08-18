@@ -163,7 +163,7 @@ class BluetoothPeripheralManager: NSObject {
                         _ = m5StackBluetoothTransmitter.writeBgReadingInfo(bgReading: bgReadingToSend[0])
                     }
                     
-                case .DexcomType, .BubbleType, .MiaoMiaoType, .Libre2Type, .DexcomG7Type:
+                case .DexcomType, .BubbleType, .MiaoMiaoType, .Libre2Type, .SibionicsChineseType, .DexcomG7Type:
                     // cgm's don't receive reading, they send it
                     break
                     
@@ -299,6 +299,21 @@ class BluetoothPeripheralManager: NSObject {
                         }
                         
                     }
+
+                case .SibionicsChineseType:
+                    if let sibionics = bluetoothPeripheral as? Sibionics,
+                       let sensorCode = sibionics.blePeripheral.transmitterId,
+                       let cgmTransmitterDelegate = cgmTransmitterDelegate {
+                        newTransmitter = CGMSibionicsChineseTransmitter(
+                            address: sibionics.blePeripheral.address,
+                            name: sibionics.blePeripheral.name,
+                            sensorCode: sensorCode,
+                            bluetoothTransmitterDelegate: self,
+                            cgmTransmitterDelegate: cgmTransmitterDelegate
+                        )
+                    } else {
+                        trace("in getBluetoothTransmitter, SIBIONICS code or delegate is nil", log: log, category: ConstantsLog.categoryBluetoothPeripheralManager, type: .error)
+                    }
                     
                 case .Libre3HeartBeatType:
                     
@@ -387,6 +402,11 @@ class BluetoothPeripheralManager: NSObject {
                 if bluetoothTransmitter is CGMLibre2Transmitter {
                     return .Libre2Type
                 }
+
+            case .SibionicsChineseType:
+                if bluetoothTransmitter is CGMSibionicsChineseTransmitter {
+                    return .SibionicsChineseType
+                }
                 
             case .Libre3HeartBeatType:
                 if bluetoothTransmitter is Libre3HeartBeatBluetoothTransmitter {
@@ -459,6 +479,18 @@ class BluetoothPeripheralManager: NSObject {
             }
             
             return CGMLibre2Transmitter(address: nil, name: nil, bluetoothTransmitterDelegate: bluetoothTransmitterDelegate ?? self, cGMLibre2TransmitterDelegate: self, sensorSerialNumber: nil, cGMTransmitterDelegate: cgmTransmitterDelegate, nonFixedSlopeEnabled: nil, webOOPEnabled: nil)
+
+        case .SibionicsChineseType:
+            guard let sensorCode = transmitterId, let cgmTransmitterDelegate = cgmTransmitterDelegate else {
+                fatalError("in createNewTransmitter, SIBIONICS code or cgmTransmitterDelegate is nil")
+            }
+            return CGMSibionicsChineseTransmitter(
+                address: nil,
+                name: nil,
+                sensorCode: sensorCode,
+                bluetoothTransmitterDelegate: bluetoothTransmitterDelegate ?? self,
+                cgmTransmitterDelegate: cgmTransmitterDelegate
+            )
             
         case .Libre3HeartBeatType:
             
@@ -816,6 +848,28 @@ class BluetoothPeripheralManager: NSObject {
                         
                         
                     }
+
+                case .SibionicsChineseType:
+                    if let sibionics = blePeripheral.sibionics {
+                        blePeripheralFound = true
+                        let index = insertInBluetoothPeripherals(bluetoothPeripheral: sibionics)
+                        if sibionics.blePeripheral.shouldconnect,
+                           let sensorCode = sibionics.blePeripheral.transmitterId {
+                            bluetoothTransmitters.insert(
+                                CGMSibionicsChineseTransmitter(
+                                    address: sibionics.blePeripheral.address,
+                                    name: sibionics.blePeripheral.name,
+                                    sensorCode: sensorCode,
+                                    bluetoothTransmitterDelegate: self,
+                                    cgmTransmitterDelegate: cgmTransmitterDelegate
+                                ),
+                                at: index
+                            )
+                            currentCgmTransmitterAddress = blePeripheral.address
+                        } else {
+                            bluetoothTransmitters.insert(nil, at: index)
+                        }
+                    }
                     
                 case .Libre3HeartBeatType:
                     if let libre2heartbeat = blePeripheral.libre2heartbeat {
@@ -1067,7 +1121,7 @@ class BluetoothPeripheralManager: NSObject {
                     bluetoothPeripheral.blePeripheral.parameterUpdateNeededAtNextConnect = true
                 }
              
-            case .DexcomType, .BubbleType, .MiaoMiaoType, .Libre2Type, .Libre3HeartBeatType, .DexcomG7HeartBeatType, .OmniPodHeartBeatType, .DexcomG7Type:
+            case .DexcomType, .BubbleType, .MiaoMiaoType, .Libre2Type, .SibionicsChineseType, .Libre3HeartBeatType, .DexcomG7HeartBeatType, .OmniPodHeartBeatType, .DexcomG7Type:
 
                 // nothing to check
                 break
@@ -1287,5 +1341,4 @@ extension BluetoothPeripheralManager: BluetoothPeripheralManaging {
     }
     
 }
-
 
