@@ -52,7 +52,6 @@ jobs:
             -workspace xdrip.xcworkspace \
             -scheme xdrip \
             -configuration Debug \
-            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$DERIVED_DATA" \
             CODE_SIGNING_ALLOWED=NO \
