@@ -71,17 +71,19 @@ public class LoopManager: NSObject {
         // this was previously done at the class level, but the scope must now be changed to allow us to change the target app group
         guard let sharedUserDefaults = UserDefaults(suiteName: suiteName) else {return}
         
-        guard let timeStampLatestLoopSharedBgReading = UserDefaults.standard.timeStampLatestLoopSharedBgReading else {
-            
-            // if the last share data hasn't been set previously (could only happen on the first run) then just set it and return until next bg reading is processed. We won't normally ever get to here
-            UserDefaults.standard.timeStampLatestLoopSharedBgReading = Date()
-            
-            return
-            
-        }
+        // On the first share, include up to 30 minutes of existing readings and
+        // publish immediately. Returning here used to leave a newly configured
+        // OS-AID source without glucose until another reading arrived.
+        let timeStampLatestLoopSharedBgReading = UserDefaults.standard.timeStampLatestLoopSharedBgReading ?? Date(timeIntervalSinceNow: -TimeInterval(minutes: 30))
         
         // to make things easier to read
-        let shareToLoopOnceEvery5Minutes = UserDefaults.standard.shareToLoopOnceEvery5Minutes
+        // Trio already polls the shared app group and applies its own frequency
+        // filter. Throttling the producer as well lets the two independent
+        // schedules drift: Trio can then read the previous xDrip value when it
+        // performs a loop, making an otherwise current value appear 6-8 minutes
+        // old. Keep Trio's container fresh on every new reading; this does not
+        // make Trio loop every minute. Preserve the optional throttle for Loop.
+        let shareToLoopOnceEvery5Minutes = UserDefaults.standard.shareToLoopOnceEvery5Minutes && UserDefaults.standard.loopShareType != .trio
         
         // if the user doesn't want to limit Loop Share OR (if they do AND more than 4.5 minutes has passed since the last time we shared data) then let's process the readings and share them
         if !shareToLoopOnceEvery5Minutes || (shareToLoopOnceEvery5Minutes && Date().timeIntervalSince(timeStampLatestLoopSharedBgReading) > TimeInterval(minutes: 4.5)) {
@@ -219,6 +221,11 @@ public class LoopManager: NSObject {
             
             // write readings to shared user defaults
             sharedUserDefaults.set(data, forKey: "latestReadings")
+
+            if UserDefaults.standard.loopShareType == .trio, let newestReading = lastReadings.first {
+                let age = max(0, Int(Date().timeIntervalSince(newestReading.timeStamp)))
+                trace("    in share, published newest Trio reading with age %{public}d seconds", log: log, category: ConstantsLog.categoryLoopManager, type: .info, age)
+            }
             
             // mirror exactly what we wrote so local deletions are reflected immediately
             UserDefaults.standard.readingsStoredInSharedUserDefaultsAsDictionary = dictionary
