@@ -831,9 +831,9 @@ class BluetoothPeripheralViewController: UIViewController {
             transmitterIdMessageText = Texts_SettingsView.dexcomG7Message
             placeHolder = "DX0000"
         case .SibionicsChineseType:
-            transmitterIdTitleText = "Chinese SIBIONICS GS1 code"
-            transmitterIdMessageText = "Enter the 8-character sensor code printed on the Chinese GS1 label, or paste the complete GS1 QR payload. This selects the per-sensor v1.1.5G sensitivity."
-            placeHolder = "PQUX23GG"
+            transmitterIdTitleText = "Chinese SIBIONICS GS1 code and BLE address"
+            transmitterIdMessageText = "Enter the 8-character sensor code (or complete GS1 QR), then | and the sensor BLE address. The address is required by the Chinese AA55 request and can be read with Juggluco or an Android BLE scanner."
+            placeHolder = "9MAE230B|AA:BB:CC:DD:EE:FF"
         default:
             break
         }

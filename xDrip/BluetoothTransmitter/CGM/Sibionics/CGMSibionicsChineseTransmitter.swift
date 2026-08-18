@@ -13,6 +13,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     private weak var cgmTransmitterDelegate: CGMTransmitterDelegate?
     private let shortCode: String
     private let sensitivity: Double?
+    private let sensorMacAddress: [UInt8]?
     private let defaults: UserDefaults
     private let stateLock = NSLock()
     private let log = OSLog(subsystem: ConstantsLog.subSystem, category: ConstantsLog.categoryBlueToothTransmitter)
@@ -23,6 +24,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     private var nextIndex: Int
     private var pollingTimer: Timer?
     private var didAnnounceSensor = false
+    private var didReportMissingMac = false
 
     private var persistenceSuffix: String { shortCode.uppercased() }
     private var checkpointKey: String { "sibionics.v115g.checkpoint.\(persistenceSuffix)" }
@@ -39,6 +41,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         let resolvedShortCode = parsedCode ?? sensorCode.uppercased().filter { $0.isLetter || $0.isNumber }
         self.shortCode = resolvedShortCode
         self.sensitivity = parsedCode.flatMap { SibionicsChineseSensitivity.decode($0) }
+        self.sensorMacAddress = SibionicsChineseIdentity.macAddress(from: sensorCode)
         self.cgmTransmitterDelegate = cgmTransmitterDelegate
         self.defaults = defaults
         let savedCheckpoint = defaults.data(forKey: "sibionics.v115g.checkpoint.\(resolvedShortCode)")
@@ -121,9 +124,17 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     func requestNewReading() {
         stateLock.lock()
         let requestedIndex = nextIndex
+        let shouldReportMissingMac = sensorMacAddress == nil && !didReportMissingMac
+        if shouldReportMissingMac { didReportMissingMac = true }
         stateLock.unlock()
+        guard let sensorMacAddress = sensorMacAddress else {
+            if shouldReportMissingMac {
+                reportConfigurationError("Chinese SIBIONICS needs the sensor BLE address. Edit Transmitter ID as CODE|AA:BB:CC:DD:EE:FF.")
+            }
+            return
+        }
         _ = writeDataToPeripheral(
-            data: SibionicsChineseProtocol.dataRequest(nextIndex: requestedIndex),
+            data: SibionicsChineseProtocol.dataRequest(nextIndex: requestedIndex, macAddress: sensorMacAddress),
             type: .withResponse
         )
     }
@@ -147,11 +158,19 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     }
 
     private func stopPolling() {
-        let invalidate = { [weak self] in
-            self?.pollingTimer?.invalidate()
-            self?.pollingTimer = nil
+        // Do not create a weak reference to `self` here. This method is also
+        // called from deinit, where objc_initWeak aborts because the object is
+        // already being destroyed. Capture only the timer for deferred
+        // invalidation so teardown never retains or weak-registers `self`.
+        let timer = pollingTimer
+        pollingTimer = nil
+        if Thread.isMainThread {
+            timer?.invalidate()
+        } else {
+            DispatchQueue.main.async {
+                timer?.invalidate()
+            }
         }
-        if Thread.isMainThread { invalidate() } else { DispatchQueue.main.async(execute: invalidate) }
     }
 
     private func drainReceiveBuffer() {
@@ -325,6 +344,13 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
 
     private func reportAlgorithmError(_ message: String) {
         trace("SIBIONICS Chinese algorithm unavailable: %{public}@", log: log, category: ConstantsLog.categoryBlueToothTransmitter, type: .error, message)
+        DispatchQueue.main.async { [weak self] in
+            self?.bluetoothTransmitterDelegate?.error(message: message)
+        }
+    }
+
+    private func reportConfigurationError(_ message: String) {
+        trace("SIBIONICS Chinese configuration error: %{public}@", log: log, category: ConstantsLog.categoryBlueToothTransmitter, type: .error, message)
         DispatchQueue.main.async { [weak self] in
             self?.bluetoothTransmitterDelegate?.error(message: message)
         }

@@ -39,8 +39,14 @@ is not required to build the iOS application.
 ## Sensor setup
 
 In xDrip, add a Bluetooth peripheral of type **SIBIONICS GS1 Chinese**. Enter the
-8-character Chinese sensor code, or paste the complete GS1 QR payload. Keep the
-official SIBIONICS app disconnected from the sensor while xDrip is connecting.
+8-character Chinese sensor code (or paste the complete GS1 QR payload), followed
+by `|` and the sensor's BLE address. Example:
+
+`9MAE230B|AA:BB:CC:DD:EE:FF`
+
+The address is part of the stock Chinese `AA 55 07` request. iOS CoreBluetooth
+does not expose it, so obtain it with Juggluco or an Android BLE scanner while
+xDrip and the official SIBIONICS app are disconnected from the sensor.
 
 The sensor must be able to return a continuous one-minute history beginning at
 index 1 when no compatible algorithm snapshot exists. If an index gap is found,
@@ -56,15 +62,20 @@ polling is required; a heartbeat now explicitly triggers a Chinese GS1 request.
 - Kotlin/JVM reference versus the generated Kotlin/JavaScript exact-core output:
   3,153 generated samples, zero mismatches.
 - Snapshot/restore continuation through the same stream: zero mismatches.
-- Xcode project structure, source membership, resource membership, Core Data XML,
-  and the syntax of all newly added Swift files were checked on Windows.
-- A signed Xcode build and live Chinese sensor replay require macOS and real
-  hardware and have **not** been run in this environment.
+- GitHub Actions produced a signed TestFlight build, and an iPhone live test
+  confirmed FF30 connection, FF31 notifications, and successful FF32 writes.
+- The first live build sent zeroes in place of the BLE address. The sensor only
+  returned `AA 55 07` echo frames and no `AA 55 09` glucose data. That fallback
+  has been removed; the explicit-address request still requires a live retest.
+- A TestFlight crash report identified teardown in `stopPolling()` during
+  `deinit`; the weak-reference registration responsible for that crash has been
+  removed, but the fix still requires a live disconnect retest.
 
 The parity checks establish deterministic equivalence to the recovered managed
-source for the tested inputs. They do not constitute clinical validation or
-proof that every vendor edge case has been recovered. Do not use this experimental
-path as the sole basis for treatment decisions.
+source for the tested inputs. Until an explicit-address build receives and
+processes real `AA 55 09` frames, direct sensor support remains experimental and
+must not be described as verified. The checks do not constitute clinical
+validation. Do not use this path as the sole basis for treatment decisions.
 
 ## Provenance
 
