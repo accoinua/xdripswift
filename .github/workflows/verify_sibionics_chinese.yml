@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   verify-and-build:
-    name: Verify algorithm and compile simulator app
+    name: Verify algorithm and compile unsigned device app
     runs-on: macos-26
     timeout-minutes: 45
     env:
@@ -44,7 +44,7 @@ jobs:
             -workspace xdrip.xcworkspace \
             -scheme xdrip
 
-      - name: Build unsigned iOS Simulator app
+      - name: Build unsigned iOS device app
         shell: bash
         run: |
           set -o pipefail
@@ -52,8 +52,8 @@ jobs:
             -workspace xdrip.xcworkspace \
             -scheme xdrip \
             -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath "$DERIVED_DATA" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -61,10 +61,10 @@ jobs:
             DEVELOPMENT_TEAM='' \
             build | tee "$BUILD_LOG"
 
-      - name: Package simulator app
+      - name: Package unsigned device app
         shell: bash
         run: |
-          products="$DERIVED_DATA/Build/Products/Debug-iphonesimulator"
+          products="$DERIVED_DATA/Build/Products/Debug-iphoneos"
           app_path=''
           for candidate in "$products"/*.app; do
             if [ -d "$candidate" ]; then
@@ -81,13 +81,13 @@ jobs:
           echo "Packaging $app_path"
           ditto -c -k --sequesterRsrc --keepParent \
             "$app_path" \
-            "${{ runner.temp }}/xdrip-simulator.app.zip"
+            "${{ runner.temp }}/xdrip-unsigned-device.app.zip"
 
-      - name: Upload simulator app
+      - name: Upload unsigned device app
         uses: actions/upload-artifact@v6
         with:
-          name: xdrip-sibionics-chinese-simulator
-          path: ${{ runner.temp }}/xdrip-simulator.app.zip
+          name: xdrip-sibionics-chinese-unsigned-device
+          path: ${{ runner.temp }}/xdrip-unsigned-device.app.zip
           if-no-files-found: error
           retention-days: 14
 
