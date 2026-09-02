@@ -15,6 +15,9 @@ enum BluetoothPeripheralType: String, CaseIterable {
     
     /// Libre 2
     case Libre2Type = "Libre 2/2+ EU"
+
+    /// Chinese SIBIONICS GS1 using the AA55 protocol.
+    case SibionicsChineseType = "SIBIONICS GS1 Chinese"
     
     /// MiaoMiao
     case MiaoMiaoType = "MiaoMiao"
@@ -65,6 +68,9 @@ enum BluetoothPeripheralType: String, CaseIterable {
             
         case .Libre2Type:
             return Libre2(address: address, name: name, alias: nil, nsManagedObjectContext: nsManagedObjectContext)
+
+        case .SibionicsChineseType:
+            return Sibionics(address: address, name: name, alias: nil, nsManagedObjectContext: nsManagedObjectContext)
             
         case .Libre3HeartBeatType:
             return Libre2HeartBeat(address: address, name: name, alias: nil, nsManagedObjectContext: nsManagedObjectContext)
@@ -93,7 +99,7 @@ enum BluetoothPeripheralType: String, CaseIterable {
         case .M5StackType, .M5StickCType:
             return .M5Stack
             
-        case .DexcomType, .BubbleType, .MiaoMiaoType, .Libre2Type, .DexcomG7Type, .MedtrumTouchCareNanoType:
+        case .DexcomType, .BubbleType, .MiaoMiaoType, .Libre2Type, .SibionicsChineseType, .DexcomG7Type, .MedtrumTouchCareNanoType:
             return .CGM
 
         case .Libre3HeartBeatType, .DexcomG7HeartBeatType, .OmniPodHeartBeatType:
@@ -108,7 +114,7 @@ enum BluetoothPeripheralType: String, CaseIterable {
         
         switch self {
             
-        case .DexcomType, .Libre3HeartBeatType, .DexcomG7Type, .DexcomG7HeartBeatType:
+        case .DexcomType, .Libre3HeartBeatType, .DexcomG7Type, .DexcomG7HeartBeatType, .SibionicsChineseType:
             return true
 
         default:
@@ -156,6 +162,12 @@ enum BluetoothPeripheralType: String, CaseIterable {
                 return Texts_ErrorMessages.DexcomTransmitterIDInvalidCharacters
             }
             
+            return nil
+
+        case .SibionicsChineseType:
+            guard SibionicsChineseIdentity.shortCode(from: transmitterId) != nil else {
+                return "Enter the 8-character connection code or scan the full GS1 DataMatrix code."
+            }
             return nil
             
         default:

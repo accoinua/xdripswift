@@ -371,6 +371,12 @@ extension BluetoothPeripheralManager: BluetoothTransmitterDelegate {
 
     // to confirm to protocol BluetoothPeripheralDelegate
     func heartBeat() {
+        // A heartbeat wake is also a chance to recover a missed one-minute
+        // SIBIONICS frame while iOS has the app suspended.
+        if getCGMTransmitter()?.cgmTransmitterType() == .sibionicsChinese {
+            requestNewReading()
+        }
+
         // Every transmitter heartbeat converges here after the transmitter's own minimum-interval
         // guard. Recording the typed fact at this boundary captures every real heartbeat without
         // exposing a transmitter identifier, packet contents or the developer trace message.

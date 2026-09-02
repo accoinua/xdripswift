@@ -287,6 +287,7 @@ enum XDripCGMMetadataBuilder {
         case .miaomiao: return "libre_miaomiao"
         case .Bubble: return "libre_bubble"
         case .medtrumTouchCareNano: return "medtrum_nano"
+        case .sibionicsChinese: return "sibionics_gs1_chinese"
         case nil: return nil
         }
     }
@@ -306,7 +307,7 @@ enum XDripCGMMetadataBuilder {
     private static func directExpectedInterval(_ type: CGMTransmitterType?) -> Double? {
         switch type {
         case .dexcom, .dexcomG7: return 300
-        case .Libre2, .miaomiao, .Bubble, .medtrumTouchCareNano: return 60
+        case .Libre2, .miaomiao, .Bubble, .medtrumTouchCareNano, .sibionicsChinese: return 60
         case nil: return nil
         }
     }
@@ -331,7 +332,7 @@ enum XDripCGMMetadataBuilder {
             return .minutes(transmitter?.isAnubisG6() == true
                 ? ConstantsMaster.minimumSensorWarmUpRequiredInMinutesDexcomG6Anubis
                 : ConstantsMaster.minimumSensorWarmUpRequiredInMinutesDexcomG5G6)
-        case .Libre2, .miaomiao, .Bubble, .medtrumTouchCareNano:
+        case .Libre2, .miaomiao, .Bubble, .medtrumTouchCareNano, .sibionicsChinese:
             return .minutes(ConstantsMaster.minimumSensorWarmUpRequiredInMinutes)
         case nil:
             let description = defaults.activeSensorDescription?.lowercased() ?? ""
@@ -439,16 +440,10 @@ public class LoopManager: NSObject {
         // this was previously done at the class level, but the scope must now be changed to allow us to change the target app group
         guard let sharedUserDefaults = UserDefaults(suiteName: suiteName) else {return}
 
-        guard let timeStampLatestLoopSharedBgReading = UserDefaults.standard.timeStampLatestLoopSharedBgReading else {
-
-            // if the last share data hasn't been set previously (could only happen on the first run) then just set it and return until next bg reading is processed. We won't normally ever get to here
-            UserDefaults.standard.timeStampLatestLoopSharedBgReading = Date()
-
-            publishMetadata(sharedUserDefaults: sharedUserDefaults, latestSharedGlucoseAt: nil)
-
-            return
-
-        }
+        // Publish immediately on the first run and include enough recent history
+        // for Trio to consume the current value without waiting for another frame.
+        let timeStampLatestLoopSharedBgReading = UserDefaults.standard.timeStampLatestLoopSharedBgReading
+            ?? Date(timeIntervalSinceNow: -TimeInterval(minutes: 30))
 
         trace("    in share, sharing data with selected OS-AID target",log: log, category: ConstantsLog.categoryLoopManager, type: .debug, troubleshooting: .detailed(.integration(name: .osAid, activity: .started)))
 
@@ -608,6 +603,11 @@ public class LoopManager: NSObject {
         // write readings to shared user defaults
         sharedUserDefaults.set(data, forKey: "latestReadings")
         trace("    in share, stored readings for selected OS-AID target", log: log, category: ConstantsLog.categoryLoopManager, type: .debug, troubleshooting: .detailed(.integration(name: .osAid, activity: .succeeded(itemCount: dictionary.count))))
+
+        if loopShareType == .trio, let newestReading = lastReadings.first {
+            let age = max(0, Int(Date().timeIntervalSince(newestReading.timeStamp)))
+            trace("    in share, published newest Trio reading with age %{public}d seconds", log: log, category: ConstantsLog.categoryLoopManager, type: .info, age)
+        }
 
         if loopShareType == .trio {
             publishMetadata(

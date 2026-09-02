@@ -477,6 +477,8 @@ extension BluetoothPeripheralType {
             return "Bubble/Mini/Nano"
         case .MedtrumTouchCareNanoType:
             return "Medtrum Nano Pump"
+        case .SibionicsChineseType:
+            return "SIBIONICS GS1 Chinese"
         default:
             return rawValue
         }
@@ -489,6 +491,7 @@ extension BluetoothPeripheralType {
             .DexcomG7Type,
             .MiaoMiaoType,
             .BubbleType,
+            .SibionicsChineseType,
             .MedtrumTouchCareNanoType
         ]
     ]

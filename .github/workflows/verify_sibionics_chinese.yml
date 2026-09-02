@@ -1,0 +1,113 @@
+name: 0. Verify Chinese SIBIONICS
+run-name: Verify Chinese SIBIONICS (${{ github.ref_name }})
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sibionics-chinese-v115g
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sibionics-chinese-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-and-build:
+    name: Verify algorithm and compile unsigned device app
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      # The `runner` context is unavailable at job-level `env`. The workspace
+      # context is valid here and the checkout is disposable on the hosted Mac.
+      DERIVED_DATA: ${{ github.workspace }}/xdrip-derived-data
+      BUILD_LOG: ${{ github.workspace }}/xcodebuild.log
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Select Xcode 26.2
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.2.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Verify Chinese SIBIONICS V115G bundle
+        run: node Tools/SibionicsV115G/verify-bundle.js
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -workspace xdrip.xcworkspace \
+            -scheme xdrip
+
+      - name: Build unsigned iOS device app
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace xdrip.xcworkspace \
+            -scheme xdrip \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            DEVELOPMENT_TEAM='' \
+            build | tee "$BUILD_LOG"
+
+      - name: Package unsigned device app
+        shell: bash
+        run: |
+          products="$DERIVED_DATA/Build/Products/Debug-iphoneos"
+          app_path=''
+          for candidate in "$products"/*.app; do
+            if [ -d "$candidate" ]; then
+              app_path="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$app_path" ]; then
+            echo "No top-level .app was produced in $products" >&2
+            exit 1
+          fi
+
+          echo "Packaging $app_path"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$app_path" \
+            "${{ runner.temp }}/xdrip-unsigned-device.app.zip"
+
+      - name: Upload unsigned device app
+        uses: actions/upload-artifact@v6
+        with:
+          name: xdrip-sibionics-chinese-unsigned-device
+          path: ${{ runner.temp }}/xdrip-unsigned-device.app.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Report Xcode errors
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f "$BUILD_LOG" ]; then
+            # Surface compiler diagnostics through the public Check Run API;
+            # downloading Actions artifacts otherwise requires authentication.
+            grep -E '(^|[[:space:]])(error:|fatal error:)' "$BUILD_LOG" \
+              | tail -n 100 \
+              | sed 's/^/::error::/' \
+              || true
+          fi
+
+      - name: Upload Xcode build log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: xdrip-sibionics-chinese-build-log
+          path: ${{ env.BUILD_LOG }}
+          if-no-files-found: warn
+          retention-days: 14

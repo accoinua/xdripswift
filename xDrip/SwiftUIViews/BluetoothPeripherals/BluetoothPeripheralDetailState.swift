@@ -35,6 +35,7 @@ final class BluetoothPeripheralDetailState: NSObject, ObservableObject {
     @Published private(set) var category = BluetoothPeripheralCategory.CGM
     @Published private(set) var canDeletePeripheral = false
     @Published var pendingAlert: BluetoothPeripheralDetailAlert?
+    @Published var isShowingSibionicsCodeScanner = false
 
     // MARK: - Dependencies
 
@@ -151,7 +152,12 @@ final class BluetoothPeripheralDetailState: NSObject, ObservableObject {
 
         if bluetoothPeripheral == nil, expectedBluetoothPeripheralType.needsTransmitterId() {
             DispatchQueue.main.async { [weak self] in
-                self?.requestTransmitterId()
+                guard let self else { return }
+                if self.expectedBluetoothPeripheralType == .SibionicsChineseType {
+                    self.isShowingSibionicsCodeScanner = true
+                } else {
+                    self.requestTransmitterId()
+                }
             }
         }
 
@@ -207,6 +213,19 @@ final class BluetoothPeripheralDetailState: NSObject, ObservableObject {
             },
             secondaryButtonTitle: Texts_Common.Cancel
         )
+    }
+
+    func acceptSibionicsCode(_ scannedCode: String) {
+        guard let shortCode = SibionicsChineseIdentity.shortCode(from: scannedCode) else { return }
+        isShowingSibionicsCodeScanner = false
+        setTransmitterId(shortCode)
+    }
+
+    func enterSibionicsCodeManually() {
+        isShowingSibionicsCodeScanner = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.requestTransmitterId()
+        }
     }
 
     func presentTextEntry(_ textEntry: BluetoothPeripheralTextEntry) {
@@ -287,6 +306,19 @@ final class BluetoothPeripheralDetailState: NSObject, ObservableObject {
                     self?.requestTransmitterId()
                 } : nil
             ))
+
+            if expectedBluetoothPeripheralType == .SibionicsChineseType,
+               transmitterIdTempValue == nil {
+                rows.append(row(
+                    id: "sibionics-scan-code",
+                    title: "Scan sensor code",
+                    detail: "GS1 DataMatrix",
+                    showsDisclosure: true,
+                    action: { [weak self] in
+                        self?.isShowingSibionicsCodeScanner = true
+                    }
+                ))
+            }
         }
 
         // Read success only has meaning for the transmitter currently selected for use.
@@ -421,7 +453,7 @@ final class BluetoothPeripheralDetailState: NSObject, ObservableObject {
             return makeM5StackSections(bluetoothPeripheral: bluetoothPeripheral, includesSpecificM5StackSection: true)
         case .M5StickCType:
             return makeM5StackSections(bluetoothPeripheral: bluetoothPeripheral, includesSpecificM5StackSection: false)
-        case .Libre3HeartBeatType, .DexcomG7HeartBeatType, .OmniPodHeartBeatType:
+        case .Libre3HeartBeatType, .DexcomG7HeartBeatType, .OmniPodHeartBeatType, .SibionicsChineseType:
             return []
         }
     }
@@ -1245,6 +1277,11 @@ private extension BluetoothPeripheralDetailState {
         case .DexcomG7Type, .DexcomG7HeartBeatType:
             transmitterIdMessageText = Texts_SettingsView.dexcomG7Message
             placeholder = "DX0000"
+        case .SibionicsChineseType:
+            transmitterIdTitleText = "SIBIONICS connection code"
+            transmitterIdMessageText = "Enter the 8-character connection code printed below the GS1 DataMatrix."
+            placeholder = "9MAE230B"
+            textInputAutocapitalization = .characters
         default:
             break
         }
@@ -1279,7 +1316,14 @@ private extension BluetoothPeripheralDetailState {
 
     func setTransmitterId(_ transmitterId: String) {
         // Only G5/G6 transmitter IDs must be uppercase. Other Bluetooth names can use mixed case.
-        let transmitterIdValue = expectedBluetoothPeripheralType == .DexcomType ? transmitterId.uppercased() : transmitterId
+        let transmitterIdValue: String
+        if expectedBluetoothPeripheralType == .DexcomType {
+            transmitterIdValue = transmitterId.uppercased()
+        } else if expectedBluetoothPeripheralType == .SibionicsChineseType {
+            transmitterIdValue = SibionicsChineseIdentity.shortCode(from: transmitterId) ?? transmitterId.uppercased()
+        } else {
+            transmitterIdValue = transmitterId
+        }
 
         transmitterIdTempValue = transmitterIdValue.toNilIfLength0() ?? ConstantsBluetoothPairing.dummyDexcomG7TypeTransmitterId
 

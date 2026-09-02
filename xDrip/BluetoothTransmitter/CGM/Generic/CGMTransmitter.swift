@@ -102,6 +102,9 @@ enum CGMTransmitterType:String, CaseIterable {
     /// Libre2
     case Libre2 = "Libre2"
 
+    /// Chinese SIBIONICS GS1 using the stock v1.1.5G calculation pipeline.
+    case sibionicsChinese = "SIBIONICS GS1 Chinese"
+
     /// Medtrum TouchCare Nano Pump with integrated CGM data relayed via the pump BLE session.
     /// Keep this raw value stable because it is persisted in UserDefaults.
     case medtrumTouchCareNano = "Medtrum Nano"
@@ -125,7 +128,7 @@ enum CGMTransmitterType:String, CaseIterable {
         case .dexcom, .dexcomG7:
             return .Dexcom
             
-        case .miaomiao, .Bubble, .Libre2:
+        case .miaomiao, .Bubble, .Libre2, .sibionicsChinese:
             return .Libre
 
         case .medtrumTouchCareNano:
@@ -147,6 +150,9 @@ enum CGMTransmitterType:String, CaseIterable {
         case .dexcom:
             // for dexcom in native algorithm mode, we receive the sensorStart time from the transmitter, this will be used to determine if a new sensor is received
             // the others will not send sensorStart and will also not send sensorAge
+            return true
+
+        case .sibionicsChinese:
             return true
             
         case .miaomiao, .Bubble:
@@ -183,6 +189,9 @@ enum CGMTransmitterType:String, CaseIterable {
         case .dexcomG7:
             return false
 
+        case .sibionicsChinese:
+            return false
+
         case .medtrumTouchCareNano:
             // EasyPatch owns sensor lifecycle; xDrip should not offer a manual start UI.
             return false
@@ -205,6 +214,9 @@ enum CGMTransmitterType:String, CaseIterable {
             
         case .Libre2:
             return ConstantsDefaultAlertLevels.defaultBatteryAlertLevelLibre2
+
+        case .sibionicsChinese:
+            return ConstantsDefaultAlertLevels.defaultBatteryAlertLevelDexcomG5
             
         case .dexcomG7:
             // we don't use this
@@ -238,6 +250,9 @@ enum CGMTransmitterType:String, CaseIterable {
             return ""
 
         case .medtrumTouchCareNano:
+            return ""
+
+        case .sibionicsChinese:
             return ""
 
         }
@@ -294,6 +309,9 @@ enum CGMTransmitterType:String, CaseIterable {
 
         case .medtrumTouchCareNano:
             return "Medtrum Nano Pump CGM"
+
+        case .sibionicsChinese:
+            return rawValue
             
         default:
             return self.rawValue

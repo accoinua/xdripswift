@@ -654,6 +654,11 @@ class Trace {
                             traceInfo.appendStringAndNewLine("        Type: " + bluetoothPeripheralType.rawValue)
                             
                         }
+
+                    case .SibionicsChineseType:
+                        if blePeripheral.sibionics != nil {
+                            traceInfo.appendStringAndNewLine("        Type: " + bluetoothPeripheralType.rawValue)
+                        }
                         
                     case .Libre3HeartBeatType:
                         if blePeripheral.libre2heartbeat != nil {

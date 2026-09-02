@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		9A52000131A5000100C0DE01 /* SibionicsV115GAlgorithm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000131A5000100C0DE01 /* SibionicsV115GAlgorithm.swift */; };
+		9A52000231A5000100C0DE01 /* SibionicsChineseProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000231A5000100C0DE01 /* SibionicsChineseProtocol.swift */; };
+		9A52000331A5000100C0DE01 /* CGMSibionicsChineseTransmitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000331A5000100C0DE01 /* CGMSibionicsChineseTransmitter.swift */; };
+		9A52000431A5000100C0DE01 /* sibionics-v115g.js in Resources */ = {isa = PBXBuildFile; fileRef = 9A51000431A5000100C0DE01 /* sibionics-v115g.js */; };
+		9A52000531A5000100C0DE01 /* Sibionics+CoreDataClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000531A5000100C0DE01 /* Sibionics+CoreDataClass.swift */; };
+		9A52000631A5000100C0DE01 /* Sibionics+CoreDataProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000631A5000100C0DE01 /* Sibionics+CoreDataProperties.swift */; };
+		9A52000731A5000100C0DE01 /* Sibionics+BluetoothPeripheral.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000731A5000100C0DE01 /* Sibionics+BluetoothPeripheral.swift */; };
+		9A52000931A5000100C0DE01 /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9A51000931A5000100C0DE01 /* JavaScriptCore.framework */; };
 		4D7B00023014000200000001 /* CGMG5SensorSessionDetectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D7B00013014000200000001 /* CGMG5SensorSessionDetectionTests.swift */; };
 		4D7E00023017000200000001 /* DexcomG6BluetoothSlotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D7E00013017000200000001 /* DexcomG6BluetoothSlotTests.swift */; };
 		4D7D00023016000200000001 /* BluetoothPeripheralDisplayStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D7D00013016000200000001 /* BluetoothPeripheralDisplayStatusTests.swift */; };
@@ -881,6 +889,16 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		9A51000131A5000100C0DE01 /* SibionicsV115GAlgorithm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/BluetoothTransmitter/CGM/Sibionics/SibionicsV115GAlgorithm.swift"; sourceTree = SOURCE_ROOT; };
+		9A51000231A5000100C0DE01 /* SibionicsChineseProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/BluetoothTransmitter/CGM/Sibionics/SibionicsChineseProtocol.swift"; sourceTree = SOURCE_ROOT; };
+		9A51000331A5000100C0DE01 /* CGMSibionicsChineseTransmitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/BluetoothTransmitter/CGM/Sibionics/CGMSibionicsChineseTransmitter.swift"; sourceTree = SOURCE_ROOT; };
+		9A51000431A5000100C0DE01 /* sibionics-v115g.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "xDrip/BluetoothTransmitter/CGM/Sibionics/Resources/sibionics-v115g.js"; sourceTree = SOURCE_ROOT; };
+		9A51000531A5000100C0DE01 /* Sibionics+CoreDataClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/Core Data/classes/Sibionics+CoreDataClass.swift"; sourceTree = SOURCE_ROOT; };
+		9A51000631A5000100C0DE01 /* Sibionics+CoreDataProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/Core Data/classes/Sibionics+CoreDataProperties.swift"; sourceTree = SOURCE_ROOT; };
+		9A51000731A5000100C0DE01 /* Sibionics+BluetoothPeripheral.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/BluetoothPeripheral/CGM/Sibionics/Sibionics+BluetoothPeripheral.swift"; sourceTree = SOURCE_ROOT; };
+		9A51000831A5000100C0DE01 /* xdrip v17-sibionics.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = "xdrip v17-sibionics.xcdatamodel"; sourceTree = "<group>"; };
+		9A51000931A5000100C0DE01 /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		9A51000A31A5000100C0DE01 /* xdrip v28.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = "xdrip v28.xcdatamodel"; sourceTree = "<group>"; };
 		4D7B00013014000200000001 /* CGMG5SensorSessionDetectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CGMG5SensorSessionDetectionTests.swift; sourceTree = "<group>"; };
 		4D7E00013017000200000001 /* DexcomG6BluetoothSlotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DexcomG6BluetoothSlotTests.swift; sourceTree = "<group>"; };
 		4D7D00013016000200000001 /* BluetoothPeripheralDisplayStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BluetoothPeripheralDisplayStatusTests.swift; sourceTree = "<group>"; };
@@ -2000,6 +2018,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9A52000931A5000100C0DE01 /* JavaScriptCore.framework in Frameworks */,
 				F81F3C4225D1D91300520946 /* CoreNFC.framework in Frameworks */,
 				F821CF9722AE589E005C1E43 /* HealthKit.framework in Frameworks */,
 				47DE41AA2B860DF00041DA19 /* WatchConnectivity.framework in Frameworks */,
@@ -2384,6 +2403,7 @@
 		48C0E851274A3BB6D42C6F20 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				9A51000931A5000100C0DE01 /* JavaScriptCore.framework */,
 				F81F3C4125D1D91300520946 /* CoreNFC.framework */,
 				F821CF9622AE589E005C1E43 /* HealthKit.framework */,
 				F870D3D225126A49008967B0 /* NotificationCenter.framework */,
@@ -3006,6 +3026,7 @@
 		F8AC425C21ADEBD60078C348 /* xDrip */ = {
 			isa = PBXGroup;
 			children = (
+				9A53000131A5000100C0DE01 /* SIBIONICS Chinese GS1 */,
 				F821CF9822AE589E005C1E43 /* xdrip.entitlements */,
 				F8A5EEC5257EDC910085E660 /* xdripDebug.entitlements */,
 				F8A54B0A22D9215500934E7A /* xdrip-Bridging-Header.h */,
@@ -3027,6 +3048,20 @@
 				F8EA6C8021B723A80082976B /* Utilities */,
 			);
 			path = xDrip;
+			sourceTree = "<group>";
+		};
+		9A53000131A5000100C0DE01 /* SIBIONICS Chinese GS1 */ = {
+			isa = PBXGroup;
+			children = (
+				9A51000131A5000100C0DE01 /* SibionicsV115GAlgorithm.swift */,
+				9A51000231A5000100C0DE01 /* SibionicsChineseProtocol.swift */,
+				9A51000331A5000100C0DE01 /* CGMSibionicsChineseTransmitter.swift */,
+				9A51000431A5000100C0DE01 /* sibionics-v115g.js */,
+				9A51000531A5000100C0DE01 /* Sibionics+CoreDataClass.swift */,
+				9A51000631A5000100C0DE01 /* Sibionics+CoreDataProperties.swift */,
+				9A51000731A5000100C0DE01 /* Sibionics+BluetoothPeripheral.swift */,
+			);
+			name = "SIBIONICS Chinese GS1";
 			sourceTree = "<group>";
 		};
 		F8AC42D021B342910078C348 /* Core Data */ = {
@@ -3975,6 +4010,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9A52000431A5000100C0DE01 /* sibionics-v115g.js in Resources */,
 				F82437AF24CB7A9900BED341 /* Siri_Alert_Urgent_High_Glucose.caf in Resources */,
 				F82437CA24CB7A9900BED341 /* Marimba_Flutter_or_Shake.caf in Resources */,
 				F824377724CB7A9800BED341 /* Siri_Urgent_Low_Glucose.caf in Resources */,
@@ -4307,6 +4343,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9A52000131A5000100C0DE01 /* SibionicsV115GAlgorithm.swift in Sources */,
+				9A52000231A5000100C0DE01 /* SibionicsChineseProtocol.swift in Sources */,
+				9A52000331A5000100C0DE01 /* CGMSibionicsChineseTransmitter.swift in Sources */,
+				9A52000531A5000100C0DE01 /* Sibionics+CoreDataClass.swift in Sources */,
+				9A52000631A5000100C0DE01 /* Sibionics+CoreDataProperties.swift in Sources */,
+				9A52000731A5000100C0DE01 /* Sibionics+BluetoothPeripheral.swift in Sources */,
 				4D7A00023014000100000001 /* TroubleshootingLog.swift in Sources */,
 				4D7A00043014000100000001 /* TroubleshootingLogView.swift in Sources */,
 				A50000010000000000000001 /* OnlineHelp.swift in Sources */,
@@ -5949,6 +5991,8 @@
 		F85FF3C2252D0C32004E6FF1 /* xdrip.xcdatamodeld */ = {
 			isa = XCVersionGroup;
 			children = (
+				9A51000A31A5000100C0DE01 /* xdrip v28.xcdatamodel */,
+				9A51000831A5000100C0DE01 /* xdrip v17-sibionics.xcdatamodel */,
 				4F2700313003000100000001 /* xdrip v27.xcdatamodel */,
 				4F2600313002000100000001 /* xdrip v26.xcdatamodel */,
 				4F2500313002000100000001 /* xdrip v25.xcdatamodel */,
@@ -5966,7 +6010,7 @@
 				F85FF3CB252F9C9A004E6FF1 /* xdrip v13.xcdatamodel */,
 				F85FF3C3252D0C32004E6FF1 /* xdrip v12.xcdatamodel */,
 			);
-			currentVersion = 4F2700313003000100000001 /* xdrip v27.xcdatamodel */;
+			currentVersion = 9A51000A31A5000100C0DE01 /* xdrip v28.xcdatamodel */;
 			path = xdrip.xcdatamodeld;
 			sourceTree = "<group>";
 			versionGroupType = wrapper.xcdatamodel;

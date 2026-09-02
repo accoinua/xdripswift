@@ -2,6 +2,8 @@
 
 **[Online documentation: compatibility, installation, setup and troubleshooting](https://xdrip4ios.readthedocs.io/en/latest/)**
 
+Chinese SIBIONICS GS1 fork: [build and TestFlight instructions](GITHUB_ACTIONS_BUILD_UK.md)
+
 xDrip4iOS (`xdripswift`) is a community-developed, open-source iOS app for displaying and managing real-time continuous glucose monitor (CGM) data. It can connect directly to a compatible CGM in **Master** mode or retrieve remote readings from an online service in **Follower** mode.
 
 xDrip4iOS is not related to the xDrip+ project for Android.
@@ -19,6 +21,7 @@ Master mode currently includes:
 - Dexcom G7, ONE+ and Stelo
 - Libre 2 and Libre 2 Plus EU sensors over direct Bluetooth
 - Compatible Libre sensors through MiaoMiao or Nano/Bubble/Bubble Mini transmitters
+- Chinese SIBIONICS GS1 over direct Bluetooth (this fork)
 
 Follower mode supports:
 

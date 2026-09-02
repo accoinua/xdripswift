@@ -1792,6 +1792,11 @@ import AppIntents
             // calibration factor decoded from each packet, so xDrip should not run its own calibrator.
             calibrator = NoCalibrator()
 
+        case .sibionicsChinese:
+            // The bundled Chinese GS1 pipeline produces final glucose values.
+            // User calibration is deliberately not part of this integration.
+            calibrator = NoCalibrator()
+
         }
         
         trace("in getCalibrator, calibrator = %{public}@", log: log, category: ConstantsLog.categoryRootView, type: .info, calibrator.description())
