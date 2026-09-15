@@ -372,9 +372,10 @@ extension BluetoothPeripheralManager: BluetoothTransmitterDelegate {
     // to confirm to protocol BluetoothPeripheralDelegate
     func heartBeat() {
         // A heartbeat wake is also a chance to recover a missed one-minute
-        // SIBIONICS frame while iOS has the app suspended.
-        if getCGMTransmitter()?.cgmTransmitterType() == .sibionicsChinese {
-            requestNewReading()
+        // SIBIONICS frame while iOS has the app suspended. A healthy GS1 pushes
+        // its own data, so do not poll it on every 30-second heartbeat.
+        if let sibionicsTransmitter = getCGMTransmitter() as? CGMSibionicsChineseTransmitter {
+            sibionicsTransmitter.requestNewReadingIfStale()
         }
 
         // Every transmitter heartbeat converges here after the transmitter's own minimum-interval

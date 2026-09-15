@@ -16,21 +16,37 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     private var sensorMacAddress: [UInt8]?
     private let defaults: UserDefaults
     private let stateLock = NSLock()
+    private let processingQueue = DispatchQueue(label: "xdrip.sibionics.v115g.receiver", qos: .utility)
     private let log = OSLog(subsystem: ConstantsLog.subSystem, category: ConstantsLog.categoryBlueToothTransmitter)
 
     private var algorithm: SibionicsV115GAlgorithm?
     private var algorithmLoadFailed = false
     private var receiveBuffer = Data()
     private var nextIndex: Int
+    private var lastCheckpointedNextIndex: Int
+    private var pendingHistoricalOutput: [GlucoseData] = []
+    // A first connection may replay up to 24 days of sensor history. The stock
+    // Android path advances the algorithm through it without publishing every
+    // history frame. Once a live checkpoint exists, retain bounded backfill for
+    // ordinary short disconnects and publish it together with the next live row.
+    private var shouldPreserveBackfill: Bool
     private var streamWatchdogTimer: Timer?
+    private var lastValidDataFrameAt: Date?
+    private var lastReadingRequestAt: Date?
+    private var lastWatchdogArmAt: Date?
     private var didAnnounceSensor = false
     private var didLogAdvertisement = false
     private var didLogWaitingForMacAddress = false
 
     private static let deviceInformationServiceUUID = CBUUID(string: "180A")
     private static let expectedLiveInterval: TimeInterval = 60
-    private static let streamWatchdogGrace: TimeInterval = 5
+    private static let streamWatchdogGrace: TimeInterval = 20
     private static let recoveryResponseTimeout: TimeInterval = 10
+    private static let heartbeatRecoveryThreshold: TimeInterval = 75
+    private static let minimumRequestSpacing: TimeInterval = 10
+    private static let minimumWatchdogRearmInterval: TimeInterval = 10
+    private static let historicalCheckpointInterval = 500
+    private static let maximumPreservedBackfillCount = 24 * 60
     private static let readableDeviceInformationUUIDs: Set<CBUUID> = [
         CBUUID(string: "2A23"), // System ID
         CBUUID(string: "2A24"), // Model Number String
@@ -62,7 +78,10 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         self.defaults = defaults
         let savedCheckpoint = defaults.data(forKey: "sibionics.v115g.checkpoint.\(resolvedShortCode)")
             .flatMap { try? JSONDecoder().decode(AlgorithmCheckpoint.self, from: $0) }
-        self.nextIndex = max(savedCheckpoint?.nextIndex ?? 1, 1)
+        let restoredNextIndex = max(savedCheckpoint?.nextIndex ?? 1, 1)
+        self.nextIndex = restoredNextIndex
+        self.lastCheckpointedNextIndex = restoredNextIndex
+        self.shouldPreserveBackfill = savedCheckpoint != nil && restoredNextIndex > 1
 
         let addressAndName: BluetoothTransmitter.DeviceAddressAndName
         if let address = address {
@@ -165,8 +184,15 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
             // request; it is an acknowledgement, never a data fragment.
             return
         }
-        receiveBuffer.append(value)
-        drainReceiveBuffer()
+        // A sensor with substantial history can send several ten-sample frames
+        // per second. Keep JavaScriptCore processing and frame assembly away
+        // from Core Bluetooth's main callback queue so the UI stays responsive.
+        let chunk = value
+        processingQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.receiveBuffer.append(chunk)
+            self.drainReceiveBuffer()
+        }
     }
 
     override func centralManager(
@@ -175,7 +201,9 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         error: Error?
     ) {
         stopStreamWatchdog()
-        receiveBuffer.removeAll(keepingCapacity: true)
+        processingQueue.async { [weak self] in
+            self?.receiveBuffer.removeAll(keepingCapacity: true)
+        }
         super.centralManager(central, didDisconnectPeripheral: peripheral, error: error)
     }
 
@@ -189,12 +217,41 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     }
 
     func requestNewReading() {
+        requestNewReading(requireStaleStream: false)
+    }
+
+    /// Heartbeat devices can wake xDrip every 30 seconds. They are useful for
+    /// recovering a suspended stream, but must not turn a healthy push stream
+    /// into continuous polling.
+    func requestNewReadingIfStale() {
+        requestNewReading(requireStaleStream: true)
+    }
+
+    private func requestNewReading(requireStaleStream: Bool) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.requestNewReading(requireStaleStream: requireStaleStream)
+            }
+            return
+        }
+
+        let now = Date()
         stateLock.lock()
         let requestedIndex = nextIndex
         let macAddress = sensorMacAddress
+        let streamIsStale = lastValidDataFrameAt.map {
+            now.timeIntervalSince($0) >= Self.heartbeatRecoveryThreshold
+        } ?? true
+        let requestSpacingElapsed = lastReadingRequestAt.map {
+            now.timeIntervalSince($0) >= Self.minimumRequestSpacing
+        } ?? true
         let shouldLogWaiting = macAddress == nil && !didLogWaitingForMacAddress
         if shouldLogWaiting {
             didLogWaitingForMacAddress = true
+        }
+        let shouldRequest = requestSpacingElapsed && (!requireStaleStream || streamIsStale)
+        if shouldRequest, macAddress != nil {
+            lastReadingRequestAt = now
         }
         stateLock.unlock()
 
@@ -209,6 +266,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
             }
             return
         }
+        guard shouldRequest else { return }
         _ = writeDataToPeripheral(
             data: SibionicsChineseProtocol.dataRequest(nextIndex: requestedIndex, macAddress: macAddress),
             type: .withResponse
@@ -228,6 +286,10 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     func needsSensorStartTime() -> Bool { false }
 
     private func armStreamWatchdog(after interval: TimeInterval, recoveryRequestAlreadySent: Bool) {
+        let now = Date()
+        stateLock.lock()
+        lastWatchdogArmAt = now
+        stateLock.unlock()
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.streamWatchdogTimer?.invalidate()
@@ -263,6 +325,14 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     }
 
     private func noteValidDataFrame() {
+        let now = Date()
+        stateLock.lock()
+        lastValidDataFrameAt = now
+        let shouldRearm = lastWatchdogArmAt.map {
+            now.timeIntervalSince($0) >= Self.minimumWatchdogRearmInterval
+        } ?? true
+        stateLock.unlock()
+        guard shouldRearm else { return }
         armStreamWatchdog(
             after: Self.expectedLiveInterval + Self.streamWatchdogGrace,
             recoveryRequestAlreadySent: false
@@ -416,6 +486,8 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     private func process(entries: [SibionicsChineseProtocol.Entry], receivedAt: Date) {
         guard !entries.isEmpty, ensureAlgorithm(), let algorithm = algorithm else { return }
         var output: [GlucoseData] = []
+        var processedAnyEntry = false
+        var processedLiveEntry = false
         var newestIndex = 0
         var sensorStartDate: Date?
 
@@ -453,7 +525,19 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
             let eventDate = entry.eventDate(receivedAt: receivedAt)
             let glucoseMgdl = displayMmol * 18.0
             guard glucoseMgdl.isFinite, glucoseMgdl > 0, glucoseMgdl <= 630 else { return }
-            output.append(GlucoseData(timeStamp: eventDate, glucoseLevelRaw: glucoseMgdl))
+            let glucose = GlucoseData(timeStamp: eventDate, glucoseLevelRaw: glucoseMgdl)
+            processedAnyEntry = true
+            if entry.isLive {
+                processedLiveEntry = true
+                output.append(glucose)
+            } else if shouldPreserveBackfill {
+                pendingHistoricalOutput.append(glucose)
+                if pendingHistoricalOutput.count > Self.maximumPreservedBackfillCount {
+                    pendingHistoricalOutput.removeFirst(
+                        pendingHistoricalOutput.count - Self.maximumPreservedBackfillCount
+                    )
+                }
+            }
             newestIndex = max(newestIndex, entry.index)
             sensorStartDate = eventDate.addingTimeInterval(TimeInterval(-entry.index * 60))
 
@@ -462,8 +546,19 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
             stateLock.unlock()
         }
 
-        persistAlgorithmCheckpoint()
+        guard processedAnyEntry else { return }
+        // While preserving a short gap, keep the checkpoint at the last row
+        // already handed to xDrip. If the app is interrupted before live data,
+        // the gap will be replayed rather than silently skipped on next launch.
+        if processedLiveEntry || !shouldPreserveBackfill {
+            persistAlgorithmCheckpoint(force: processedLiveEntry)
+        }
         guard !output.isEmpty else { return }
+        if !pendingHistoricalOutput.isEmpty {
+            output.append(contentsOf: pendingHistoricalOutput)
+            pendingHistoricalOutput.removeAll(keepingCapacity: true)
+        }
+        shouldPreserveBackfill = true
         output.sort { $0.timeStamp > $1.timeStamp }
         let sensorAge = TimeInterval(newestIndex * 60)
         DispatchQueue.main.async { [weak self] in
@@ -483,14 +578,19 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         }
     }
 
-    private func persistAlgorithmCheckpoint() {
-        guard let snapshot = algorithm?.snapshot() else { return }
+    private func persistAlgorithmCheckpoint(force: Bool) {
         stateLock.lock()
         let savedNextIndex = nextIndex
+        let checkpointDistance = savedNextIndex - lastCheckpointedNextIndex
         stateLock.unlock()
+        guard force || checkpointDistance >= Self.historicalCheckpointInterval else { return }
+        guard let snapshot = algorithm?.snapshot() else { return }
         let checkpoint = AlgorithmCheckpoint(nextIndex: savedNextIndex, snapshot: snapshot)
         guard let data = try? JSONEncoder().encode(checkpoint) else { return }
         defaults.set(data, forKey: checkpointKey)
+        stateLock.lock()
+        lastCheckpointedNextIndex = savedNextIndex
+        stateLock.unlock()
     }
 
     private func loadCheckpoint() -> AlgorithmCheckpoint? {
@@ -515,7 +615,10 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         defaults.removeObject(forKey: checkpointKey)
         stateLock.lock()
         nextIndex = 1
+        lastCheckpointedNextIndex = 1
         stateLock.unlock()
+        pendingHistoricalOutput.removeAll(keepingCapacity: true)
+        shouldPreserveBackfill = false
         if let sensitivity = sensitivity {
             algorithm = try? SibionicsV115GAlgorithm(sensitivity: sensitivity)
         } else {
