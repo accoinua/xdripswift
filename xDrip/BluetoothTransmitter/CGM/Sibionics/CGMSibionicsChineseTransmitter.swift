@@ -34,6 +34,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     private var lastValidDataFrameAt: Date?
     private var lastReadingRequestAt: Date?
     private var lastWatchdogArmAt: Date?
+    private var pendingGapRecoveryIndex: Int?
     private var didAnnounceSensor = false
     private var didLogAdvertisement = false
     private var didLogWaitingForMacAddress = false
@@ -201,6 +202,9 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         error: Error?
     ) {
         stopStreamWatchdog()
+        stateLock.lock()
+        pendingGapRecoveryIndex = nil
+        stateLock.unlock()
         processingQueue.async { [weak self] in
             self?.receiveBuffer.removeAll(keepingCapacity: true)
         }
@@ -438,8 +442,9 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
                 trace("SIBIONICS Chinese: rejected malformed/checksum frame", log: log, category: ConstantsLog.categoryBlueToothTransmitter, type: .error)
                 continue
             }
-            noteValidDataFrame()
-            process(entries: entries, receivedAt: Date())
+            if process(entries: entries, receivedAt: Date()) {
+                noteValidDataFrame()
+            }
         }
     }
 
@@ -483,8 +488,9 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         }
     }
 
-    private func process(entries: [SibionicsChineseProtocol.Entry], receivedAt: Date) {
-        guard !entries.isEmpty, ensureAlgorithm(), let algorithm = algorithm else { return }
+    @discardableResult
+    private func process(entries: [SibionicsChineseProtocol.Entry], receivedAt: Date) -> Bool {
+        guard !entries.isEmpty, ensureAlgorithm(), var algorithm = algorithm else { return false }
         var output: [GlucoseData] = []
         var processedAnyEntry = false
         var processedLiveEntry = false
@@ -498,6 +504,8 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
 
             if entry.index <= 1, entry.isLive, expectedIndex > 2 {
                 resetForNewSensor()
+                guard let resetAlgorithm = self.algorithm else { return false }
+                algorithm = resetAlgorithm
             }
 
             stateLock.lock()
@@ -505,10 +513,8 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
             stateLock.unlock()
             if entry.index < currentExpected { continue }
             if entry.index > currentExpected {
-                trace("SIBIONICS Chinese: exact algorithm gap, expected %{public}d received %{public}d", log: log, category: ConstantsLog.categoryBlueToothTransmitter, type: .error, currentExpected, entry.index)
-                resetForHistoryRebuild()
-                requestNewReading()
-                return
+                requestMissingIndexIfNeeded(expectedIndex: currentExpected, receivedIndex: entry.index)
+                return false
             }
 
             guard entry.rawMmol.isFinite, entry.rawMmol > 0,
@@ -519,12 +525,12 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
                     live: entry.isLive
                   ) else {
                 trace("SIBIONICS Chinese: algorithm rejected index %{public}d", log: log, category: ConstantsLog.categoryBlueToothTransmitter, type: .error, entry.index)
-                return
+                return false
             }
 
             let eventDate = entry.eventDate(receivedAt: receivedAt)
             let glucoseMgdl = displayMmol * 18.0
-            guard glucoseMgdl.isFinite, glucoseMgdl > 0, glucoseMgdl <= 630 else { return }
+            guard glucoseMgdl.isFinite, glucoseMgdl > 0, glucoseMgdl <= 630 else { return false }
             let glucose = GlucoseData(timeStamp: eventDate, glucoseLevelRaw: glucoseMgdl)
             processedAnyEntry = true
             if entry.isLive {
@@ -543,17 +549,20 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
 
             stateLock.lock()
             nextIndex = entry.index + 1
+            if pendingGapRecoveryIndex == entry.index {
+                pendingGapRecoveryIndex = nil
+            }
             stateLock.unlock()
         }
 
-        guard processedAnyEntry else { return }
+        guard processedAnyEntry else { return false }
         // While preserving a short gap, keep the checkpoint at the last row
         // already handed to xDrip. If the app is interrupted before live data,
         // the gap will be replayed rather than silently skipped on next launch.
         if processedLiveEntry || !shouldPreserveBackfill {
             persistAlgorithmCheckpoint(force: processedLiveEntry)
         }
-        guard !output.isEmpty else { return }
+        guard !output.isEmpty else { return true }
         if !pendingHistoricalOutput.isEmpty {
             output.append(contentsOf: pendingHistoricalOutput)
             pendingHistoricalOutput.removeAll(keepingCapacity: true)
@@ -575,6 +584,44 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
                 transmitterBatteryInfo: nil,
                 sensorAge: sensorAge
             )
+        }
+        return true
+    }
+
+    /// The algorithm is stateful, so a missing minute must be requested before
+    /// processing later rows. Preserve the valid state we already have instead
+    /// of restarting from index 1. A restart can replay tens of thousands of
+    /// rows and, while live frames are still queued, repeatedly restart itself.
+    private func requestMissingIndexIfNeeded(expectedIndex: Int, receivedIndex: Int) {
+        stateLock.lock()
+        let shouldStartRecovery = pendingGapRecoveryIndex != expectedIndex
+        if shouldStartRecovery {
+            pendingGapRecoveryIndex = expectedIndex
+        }
+        stateLock.unlock()
+
+        guard shouldStartRecovery else { return }
+        trace(
+            "SIBIONICS Chinese: exact algorithm gap, expected %{public}d received %{public}d; requesting the missing row without resetting",
+            log: log,
+            category: ConstantsLog.categoryBlueToothTransmitter,
+            type: .error,
+            expectedIndex,
+            receivedIndex
+        )
+        requestNewReading()
+
+        // The first request can legitimately be inside the normal ten-second
+        // write throttle. Retry once after it expires, but only if the expected
+        // row has not arrived in the meantime.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.minimumRequestSpacing) { [weak self] in
+            guard let self = self else { return }
+            self.stateLock.lock()
+            let isStillMissing = self.pendingGapRecoveryIndex == expectedIndex
+                && self.nextIndex == expectedIndex
+            self.stateLock.unlock()
+            guard isStillMissing else { return }
+            self.requestNewReading()
         }
     }
 
@@ -616,6 +663,7 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         stateLock.lock()
         nextIndex = 1
         lastCheckpointedNextIndex = 1
+        pendingGapRecoveryIndex = nil
         stateLock.unlock()
         pendingHistoricalOutput.removeAll(keepingCapacity: true)
         shouldPreserveBackfill = false
