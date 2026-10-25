@@ -282,6 +282,9 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     func getCBUUID_Receive() -> String { SibionicsChineseProtocol.notifyUUID }
     func isWebOOPEnabled() -> Bool { true }
     func nonWebOOPAllowed() -> Bool { false }
+    // Chinese GS1 produces usable one-minute rows immediately. Do not apply
+    // xDrip's generic Libre warm-up gate to this transmitter.
+    func sensorWarmupDurationInMinutes() -> Double? { 0 }
     // The rated Chinese GS1 lifetime is 14 days, but its observed extended
     // AA55 operating window is approximately 24 days (572 h minus 19 min).
     // xDrip uses this value for the lifetime/progress display; it must reflect
@@ -517,32 +520,68 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
                 return false
             }
 
-            guard entry.rawMmol.isFinite, entry.rawMmol > 0,
-                  let displayMmol = algorithm.process(
+            guard entry.rawMmol.isFinite, entry.rawMmol > 0 else {
+                trace(
+                    "SIBIONICS Chinese: invalid raw glucose at index %{public}d",
+                    log: log,
+                    category: ConstantsLog.categoryBlueToothTransmitter,
+                    type: .error,
+                    entry.index
+                )
+                return false
+            }
+
+            let displayMmol: Double
+            switch algorithm.process(
                     rawMmol: entry.rawMmol,
                     temperatureC: entry.temperatureC,
                     index: entry.index,
                     live: entry.isLive
-                  ) else {
-                trace("SIBIONICS Chinese: algorithm rejected index %{public}d", log: log, category: ConstantsLog.categoryBlueToothTransmitter, type: .error, entry.index)
+            ) {
+            case .output(let value):
+                displayMmol = value
+            case .failure(let reason):
+                trace(
+                    "SIBIONICS Chinese: algorithm failed at index %{public}d: %{public}@",
+                    log: log,
+                    category: ConstantsLog.categoryBlueToothTransmitter,
+                    type: .error,
+                    entry.index,
+                    reason
+                )
                 return false
             }
 
             let eventDate = entry.eventDate(receivedAt: receivedAt)
-            let glucoseMgdl = displayMmol * 18.0
-            guard glucoseMgdl.isFinite, glucoseMgdl > 0, glucoseMgdl <= 630 else { return false }
-            let glucose = GlucoseData(timeStamp: eventDate, glucoseLevelRaw: glucoseMgdl)
             processedAnyEntry = true
             if entry.isLive {
                 processedLiveEntry = true
-                output.append(glucose)
-            } else if shouldPreserveBackfill {
-                pendingHistoricalOutput.append(glucose)
-                if pendingHistoricalOutput.count > Self.maximumPreservedBackfillCount {
-                    pendingHistoricalOutput.removeFirst(
-                        pendingHistoricalOutput.count - Self.maximumPreservedBackfillCount
-                    )
+            }
+
+            if displayMmol > 0 {
+                let glucose = GlucoseData(timeStamp: eventDate, glucoseLevelRaw: displayMmol * 18.0)
+                if entry.isLive {
+                    output.append(glucose)
+                } else if shouldPreserveBackfill {
+                    pendingHistoricalOutput.append(glucose)
+                    if pendingHistoricalOutput.count > Self.maximumPreservedBackfillCount {
+                        pendingHistoricalOutput.removeFirst(
+                            pendingHistoricalOutput.count - Self.maximumPreservedBackfillCount
+                        )
+                    }
                 }
+            } else {
+                // The managed adapter deliberately uses zero when a carried
+                // correction would make a very low recovered row negative.
+                // The algorithm state has still consumed this minute. Advance
+                // the checkpoint without publishing a false 0 mg/dL reading.
+                trace(
+                    "SIBIONICS Chinese: consumed index %{public}d without a publishable glucose value",
+                    log: log,
+                    category: ConstantsLog.categoryBlueToothTransmitter,
+                    type: .info,
+                    entry.index
+                )
             }
             newestIndex = max(newestIndex, entry.index)
             sensorStartDate = eventDate.addingTimeInterval(TimeInterval(-entry.index * 60))

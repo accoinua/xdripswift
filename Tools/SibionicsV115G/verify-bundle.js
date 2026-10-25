@@ -64,6 +64,22 @@ if (outputHash !== expectedOutputHash) {
   throw new Error(`output vector SHA-256 mismatch: ${outputHash}`);
 }
 
+// A recovered row is processed through the replay path. A previously valid
+// negative replay delta can make an extremely low raw value clamp to zero.
+// Zero is deliberate algorithm progress, not a JavaScript failure; Swift must
+// consume the row without publishing a 0 mg/dL glucose value.
+api.reset(sensitivity);
+const lowReplaySnapshot = api.snapshotHex();
+const forcedNegativeReplayDelta = `${lowReplaySnapshot.slice(0, 16)}c0000000${lowReplaySnapshot.slice(24)}`;
+if (!api.restoreHex(forcedNegativeReplayDelta)) {
+  throw new Error("low replay snapshot restore failed");
+}
+const recoveredLow = api.process(1.5, 35.3, 837, false);
+if (!Object.is(recoveredLow, 0)) {
+  throw new Error(`expected recovered low row to produce zero, got ${recoveredLow}`);
+}
+
 console.log(`bundle_sha256=${bundleHash}`);
 console.log(`samples=${count} snapshot_restore=ok snapshot_hex_chars=${snapshot.length}`);
 console.log(`output_vector_sha256=${outputHash}`);
+console.log("zero_output_recovery=ok");

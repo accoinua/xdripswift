@@ -1,4 +1,4 @@
-# xDrip Swift 7.0.0 — Chinese SIBIONICS GS1 source release
+# xDrip Swift 7.2.0 — Chinese SIBIONICS GS1 source release
 
 This tree adds direct support for the **Chinese, single-piece SIBIONICS GS1**.
 It deliberately does not implement the EU/V120 protocol, SIBIONICS 2, GS3, or
@@ -11,8 +11,8 @@ any Trio changes.
 - Chinese QR/8-character sensitivity decoding;
 - the recovered stock v1.1.5G pipeline, executed locally with JavaScriptCore;
 - state snapshots and exact history replay after an interrupted app session;
-- a Core Data v28 lightweight migration, including compatibility with the
-  earlier SIBIONICS fork store, and a SwiftUI transmitter setup entry;
+- a Core Data v38 lightweight migration, including compatibility with the
+  earlier SIBIONICS fork stores, and a SwiftUI transmitter setup entry;
 - camera scanning of the box GS1 DataMatrix, with manual 8-character entry as
   a fallback;
 - the Kotlin sources used to produce the bundled JavaScript resource.
@@ -59,14 +59,18 @@ advertised name, so xDrip uses them to select the intended sensor automatically.
 
 The sensor must be able to return a continuous one-minute history beginning at
 index 1 when no compatible algorithm snapshot exists. If an index gap is found,
-xDrip refuses to advance the exact state and requests history again.
+xDrip requests the exact missing row without resetting valid algorithm state.
+A recovered row whose corrected display value clamps to zero is consumed and
+checkpointed, but is not published as a false 0 mg/dL glucose reading.
 
 Chinese GS1 is request/response based. xDrip polls every 60 seconds while it is
 running. Because iOS may suspend ordinary timers in the background, configure
 one of xDrip's supported **HeartBeat** peripherals if uninterrupted background
 polling is required; a heartbeat now explicitly triggers a Chinese GS1 request.
 The lifetime display uses the approximately 24-day extended Chinese operating
-window rather than the 14-day vendor-rated duration.
+window rather than the 14-day vendor-rated duration. The generic xDrip Libre
+warm-up gate is disabled for Chinese GS1; valid sensor rows are available
+immediately.
 
 ## Verification status
 
@@ -80,8 +84,11 @@ window rather than the 14-day vendor-rated duration.
 - The disconnect teardown crash found in the first live build was fixed by
   invalidating the watchdog without registering a weak reference during
   `deinit`.
-- The 7.0.0 port preserves the same protocol and algorithm code while adapting
-  setup, persistence and diagnostics to the new SwiftUI/Core Data structure.
+- The 7.2.0 port preserves the same protocol and algorithm code while adapting
+  setup, persistence and diagnostics to the latest SwiftUI/Core Data structure.
+- A physical-sensor regression in which recovered index 837 repeatedly produced
+  a non-publishable zero was fixed without skipping algorithm state or sending
+  zero glucose to Trio.
 
 The parity checks establish deterministic equivalence to the recovered managed
 source for the tested inputs, and the direct iOS path has processed real

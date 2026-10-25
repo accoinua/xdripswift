@@ -4,6 +4,11 @@ import JavaScriptCore
 /// Serial JavaScriptCore bridge to the generated managed port of the Chinese
 /// SIBIONICS GS1 v1.1.5G stock algorithm.
 final class SibionicsV115GAlgorithm {
+    enum ProcessResult {
+        case output(Double)
+        case failure(String)
+    }
+
     enum AlgorithmError: LocalizedError {
         case resourceMissing
         case scriptLoadFailed(String)
@@ -67,16 +72,26 @@ final class SibionicsV115GAlgorithm {
     }
 
     /// Returns stock mmol/L with the native five-sample correction carried over
-    /// to intervening one-minute samples. Nil means the embedded algorithm failed.
-    func process(rawMmol: Double, temperatureC: Double, index: Int, live: Bool) -> Double? {
+    /// to intervening one-minute samples. A zero output is successful algorithm
+    /// progress, but is not a publishable glucose reading.
+    func process(rawMmol: Double, temperatureC: Double, index: Int, live: Bool) -> ProcessResult {
         queue.sync {
             lastException = nil
-            guard let value = api?.invokeMethod(
+            guard let api = api else { return .failure("API unavailable") }
+            guard let value = api.invokeMethod(
                 "process",
                 withArguments: [rawMmol, temperatureC, index, live]
-            ), lastException == nil, value.isNumber else { return nil }
+            ) else { return .failure("missing JavaScript result") }
+            if let exception = lastException {
+                return .failure("JavaScript exception: \(exception)")
+            }
+            guard value.isNumber else { return .failure("non-numeric JavaScript result") }
             let output = value.toDouble()
-            return output.isFinite && output > 0 && output <= 35 ? output : nil
+            guard output.isFinite else { return .failure("non-finite output") }
+            guard output >= 0 && output <= 35 else {
+                return .failure("out-of-range output \(output)")
+            }
+            return .output(output)
         }
     }
 

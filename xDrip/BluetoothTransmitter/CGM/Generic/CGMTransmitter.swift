@@ -47,6 +47,7 @@ protocol CGMTransmitter: AnyObject {
     /// maximum sensor age in days, nil if no maximum
     /// - default implementation returns nil
     func maxSensorAgeInDays() -> Double?
+    func sensorWarmupDurationInMinutes() -> Double?
     
     /// to send a start sensor command to the transmitter
     /// - only useful for Dexcom - firefly type of transmitters, other transmitter types will have an empty implementation
@@ -191,6 +192,7 @@ enum CGMTransmitterType:String, CaseIterable {
     
     /// Libre2
     case Libre2 = "Libre2"
+    case Libre3 = "Libre3"
 
     /// Chinese SIBIONICS GS1 using the stock v1.1.5G calculation pipeline.
     case sibionicsChinese = "SIBIONICS GS1 Chinese"
@@ -218,7 +220,7 @@ enum CGMTransmitterType:String, CaseIterable {
         case .dexcom, .dexcomG7:
             return .Dexcom
             
-        case .miaomiao, .Bubble, .Libre2, .sibionicsChinese:
+        case .miaomiao, .Bubble, .Libre2, .Libre3, .sibionicsChinese:
             return .Libre
 
         case .medtrumTouchCareNano:
@@ -248,7 +250,7 @@ enum CGMTransmitterType:String, CaseIterable {
         case .miaomiao, .Bubble:
             return true
             
-        case .Libre2:
+        case .Libre2, .Libre3:
             return true
             
         case .dexcomG7:
@@ -276,7 +278,7 @@ enum CGMTransmitterType:String, CaseIterable {
         case .miaomiao, .Bubble, .Libre2:
             return true
             
-        case .dexcomG7:
+        case .dexcomG7, .Libre3:
             return false
 
         case .sibionicsChinese:
@@ -302,7 +304,7 @@ enum CGMTransmitterType:String, CaseIterable {
         case .Bubble:
             return ConstantsDefaultAlertLevels.defaultBatteryAlertLevelBubble
             
-        case .Libre2:
+        case .Libre2, .Libre3:
             return ConstantsDefaultAlertLevels.defaultBatteryAlertLevelLibre2
 
         case .sibionicsChinese:
@@ -331,6 +333,8 @@ enum CGMTransmitterType:String, CaseIterable {
         case .miaomiao, .Bubble:
             return "%"
             
+        case .Libre3:
+            return ""
         case .Libre2:
             return "%"
             
@@ -394,6 +398,9 @@ enum CGMTransmitterType:String, CaseIterable {
             }
             return "Dexcom G7"
             
+        case .Libre3:
+            return "Libre 3/3 Plus"
+
         case .Libre2:
             if let activeSensorMaxSensorAgeInDays = UserDefaults.standard.activeSensorMaxSensorAgeInDays, activeSensorMaxSensorAgeInDays >= 15 {
                 return "Libre 2 Plus EU"
@@ -414,6 +421,18 @@ enum CGMTransmitterType:String, CaseIterable {
         
     }
     
+}
+
+/// Infer known Libre 3 models from the sensor's declared NFC wear duration, not elapsed age.
+/// Keep unknown durations generic so future variants are not mislabeled as Plus.
+enum Libre3ProductNameResolver {
+    static func title(wearMinutes: Int?) -> String {
+        switch wearMinutes {
+        case 20_160: return "Libre 3"
+        case 21_600: return "Libre 3 Plus"
+        default: return "Libre 3/3 Plus"
+        }
+    }
 }
 
 /// Resolves the real Dexcom product name from the identifier that belongs to one saved device.
@@ -489,6 +508,7 @@ extension CGMTransmitter {
 
     // default implementation, nil
     func maxSensorAgeInDays() -> Double? { return nil }
+    func sensorWarmupDurationInMinutes() -> Double? { nil }
     
     // default implementation, does nothing
     func startSensor(sensorCode: String?, startDate: Date) {}
