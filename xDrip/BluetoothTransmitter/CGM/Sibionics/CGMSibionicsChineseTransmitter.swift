@@ -30,22 +30,18 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     // history frame. Once a live checkpoint exists, retain bounded backfill for
     // ordinary short disconnects and publish it together with the next live row.
     private var shouldPreserveBackfill: Bool
-    private var streamWatchdogTimer: Timer?
-    private var lastValidDataFrameAt: Date?
-    private var lastReadingRequestAt: Date?
-    private var lastWatchdogArmAt: Date?
+    // Owned by the base transmitter's serial Core Bluetooth queue.
+    private var streamRecovery = SibionicsChineseRecoveryState()
+    private var streamWatchdogWorkItem: DispatchWorkItem?
+    private var streamWatchdogGeneration: UInt64 = 0
+    private var notificationsReady = false
+    private var writeCharacteristicReady = false
     private var pendingGapRecoveryIndex: Int?
     private var didAnnounceSensor = false
     private var didLogAdvertisement = false
     private var didLogWaitingForMacAddress = false
 
     private static let deviceInformationServiceUUID = CBUUID(string: "180A")
-    private static let expectedLiveInterval: TimeInterval = 60
-    private static let streamWatchdogGrace: TimeInterval = 20
-    private static let recoveryResponseTimeout: TimeInterval = 10
-    private static let heartbeatRecoveryThreshold: TimeInterval = 75
-    private static let minimumRequestSpacing: TimeInterval = 10
-    private static let minimumWatchdogRearmInterval: TimeInterval = 10
     private static let historicalCheckpointInterval = 500
     private static let maximumPreservedBackfillCount = 24 * 60
     private static let readableDeviceInformationUUIDs: Set<CBUUID> = [
@@ -110,6 +106,26 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
 
     override func centralManager(
         _ central: CBCentralManager,
+        didConnect peripheral: CBPeripheral
+    ) {
+        beginStreamConnection()
+        super.centralManager(central, didConnect: peripheral)
+    }
+
+    override func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        beginStreamConnection()
+        super.centralManager(central, willRestoreState: dict)
+    }
+
+    private func beginStreamConnection() {
+        streamRecovery.beginConnection(at: ProcessInfo.processInfo.systemUptime)
+        notificationsReady = false
+        writeCharacteristicReady = false
+        armStreamWatchdog(after: SibionicsChineseRecoveryState.liveTimeout)
+    }
+
+    override func centralManager(
+        _ central: CBCentralManager,
         didDiscover peripheral: CBPeripheral,
         advertisementData: [String: Any],
         rssi RSSI: NSNumber
@@ -124,6 +140,14 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         error: Error?
     ) {
         super.peripheral(peripheral, didDiscoverCharacteristicsFor: service, error: error)
+        if error == nil,
+           service.uuid == CBUUID(string: SibionicsChineseProtocol.serviceUUID),
+           service.characteristics?.contains(where: {
+               $0.uuid == CBUUID(string: SibionicsChineseProtocol.writeUUID)
+           }) == true {
+            writeCharacteristicReady = true
+            requestNewReading()
+        }
         guard error == nil,
               service.uuid == Self.deviceInformationServiceUUID,
               let characteristics = service.characteristics else { return }
@@ -143,11 +167,8 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         guard error == nil,
               characteristic.uuid == CBUUID(string: SibionicsChineseProtocol.notifyUUID),
               characteristic.isNotifying else { return }
+        notificationsReady = true
         requestNewReading()
-        armStreamWatchdog(
-            after: Self.expectedLiveInterval + Self.streamWatchdogGrace,
-            recoveryRequestAlreadySent: false
-        )
     }
 
     override func peripheral(
@@ -185,15 +206,11 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
             // request; it is an acknowledgement, never a data fragment.
             return
         }
-        // A sensor with substantial history can send several ten-sample frames
-        // per second. Keep JavaScriptCore processing and frame assembly away
-        // from Core Bluetooth's main callback queue so the UI stays responsive.
-        let chunk = value
-        processingQueue.async { [weak self] in
-            guard let self = self else { return }
-            self.receiveBuffer.append(chunk)
-            self.drainReceiveBuffer()
-        }
+        // Assemble/check the small BLE frames on the Bluetooth queue so receipt
+        // cancels recovery before any slower algorithm or UI work can delay it.
+        // JavaScriptCore processing stays on the separate utility queue.
+        receiveBuffer.append(value)
+        drainReceiveBuffer()
     }
 
     override func centralManager(
@@ -202,60 +219,58 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
         error: Error?
     ) {
         stopStreamWatchdog()
+        streamRecovery.endConnection()
+        notificationsReady = false
+        writeCharacteristicReady = false
         stateLock.lock()
         pendingGapRecoveryIndex = nil
         stateLock.unlock()
-        processingQueue.async { [weak self] in
-            self?.receiveBuffer.removeAll(keepingCapacity: true)
-        }
+        receiveBuffer.removeAll(keepingCapacity: true)
         super.centralManager(central, didDisconnectPeripheral: peripheral, error: error)
     }
 
     override func prepareForRelease() {
-        stopStreamWatchdog()
+        runOnCentralQueue { [weak self] in
+            self?.stopStreamWatchdog()
+            self?.streamRecovery.endConnection()
+        }
         super.prepareForRelease()
     }
 
     deinit {
-        stopStreamWatchdog()
+        // No weak reference may be created during deinit.
+        streamWatchdogWorkItem?.cancel()
     }
 
     func requestNewReading() {
-        requestNewReading(requireStaleStream: false)
+        runOnCentralQueue { [weak self] in
+            self?.sendReadingRequest(requireStaleStream: false)
+        }
     }
 
     /// Heartbeat devices can wake xDrip every 30 seconds. They are useful for
     /// recovering a suspended stream, but must not turn a healthy push stream
     /// into continuous polling.
     func requestNewReadingIfStale() {
-        requestNewReading(requireStaleStream: true)
+        runOnCentralQueue { [weak self] in
+            self?.sendReadingRequest(requireStaleStream: true)
+        }
     }
 
-    private func requestNewReading(requireStaleStream: Bool) {
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in
-                self?.requestNewReading(requireStaleStream: requireStaleStream)
-            }
-            return
-        }
+    @discardableResult
+    private func sendReadingRequest(requireStaleStream: Bool, isRecovery: Bool = false) -> Bool {
+        // Do not spend the short background BLE wake bouncing through main, or
+        // consume the throttle before this connection's FF31/FF32 are ready.
+        guard notificationsReady, writeCharacteristicReady,
+              getConnectionStatus() == .connected else { return false }
 
-        let now = Date()
+        let now = ProcessInfo.processInfo.systemUptime
         stateLock.lock()
         let requestedIndex = nextIndex
         let macAddress = sensorMacAddress
-        let streamIsStale = lastValidDataFrameAt.map {
-            now.timeIntervalSince($0) >= Self.heartbeatRecoveryThreshold
-        } ?? true
-        let requestSpacingElapsed = lastReadingRequestAt.map {
-            now.timeIntervalSince($0) >= Self.minimumRequestSpacing
-        } ?? true
         let shouldLogWaiting = macAddress == nil && !didLogWaitingForMacAddress
         if shouldLogWaiting {
             didLogWaitingForMacAddress = true
-        }
-        let shouldRequest = requestSpacingElapsed && (!requireStaleStream || streamIsStale)
-        if shouldRequest, macAddress != nil {
-            lastReadingRequestAt = now
         }
         stateLock.unlock()
 
@@ -268,13 +283,15 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
                     type: .info
                 )
             }
-            return
+            return false
         }
-        guard shouldRequest else { return }
-        _ = writeDataToPeripheral(
+        guard streamRecovery.canRequest(at: now, requireStaleStream: requireStaleStream) else { return false }
+        guard writeDataToPeripheral(
             data: SibionicsChineseProtocol.dataRequest(nextIndex: requestedIndex, macAddress: macAddress),
             type: .withResponse
-        )
+        ) else { return false }
+        streamRecovery.didSendRequest(at: now, isRecovery: isRecovery)
+        return true
     }
 
     func cgmTransmitterType() -> CGMTransmitterType { .sibionicsChinese }
@@ -292,25 +309,26 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
     func maxSensorAgeInDays() -> Double? { 24 }
     func needsSensorStartTime() -> Bool { false }
 
-    private func armStreamWatchdog(after interval: TimeInterval, recoveryRequestAlreadySent: Bool) {
-        let now = Date()
-        stateLock.lock()
-        lastWatchdogArmAt = now
-        stateLock.unlock()
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.streamWatchdogTimer?.invalidate()
-            let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
-                self?.streamWatchdogExpired(recoveryRequestAlreadySent: recoveryRequestAlreadySent)
-            }
-            timer.tolerance = 1
-            self.streamWatchdogTimer = timer
+    private func armStreamWatchdog(after interval: TimeInterval) {
+        stopStreamWatchdog()
+        let generation = streamWatchdogGeneration
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.streamWatchdogGeneration == generation else { return }
+            self.streamWatchdogWorkItem = nil
+            self.streamWatchdogExpired()
         }
+        streamWatchdogWorkItem = workItem
+        runOnCentralQueue(after: interval) { workItem.perform() }
     }
 
-    private func streamWatchdogExpired(recoveryRequestAlreadySent: Bool) {
-        streamWatchdogTimer = nil
-        if recoveryRequestAlreadySent {
+    private func streamWatchdogExpired() {
+        guard getConnectionStatus() == .connected else { return }
+        switch streamRecovery.watchdogDecision(at: ProcessInfo.processInfo.systemUptime) {
+        case .inactive:
+            return
+        case .wait(let remaining):
+            armStreamWatchdog(after: remaining)
+        case .reconnect:
             trace(
                 "SIBIONICS Chinese: no data after recovery request; reconnecting immediately",
                 log: log,
@@ -318,48 +336,27 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
                 type: .error
             )
             disconnect()
-            return
+        case .request:
+            trace(
+                "SIBIONICS Chinese: live stream missed its expected interval; requesting backfill",
+                log: log,
+                category: ConstantsLog.categoryBlueToothTransmitter,
+                type: .info
+            )
+            if sendReadingRequest(requireStaleStream: false, isRecovery: true) {
+                armStreamWatchdog(after: SibionicsChineseRecoveryState.recoveryTimeout)
+            } else {
+                // No usable subscription/write handle after the setup window.
+                // Reconnect rather than leaving a connected, silent sensor.
+                disconnect()
+            }
         }
-
-        trace(
-            "SIBIONICS Chinese: live stream missed its expected interval; requesting backfill",
-            log: log,
-            category: ConstantsLog.categoryBlueToothTransmitter,
-            type: .info
-        )
-        requestNewReading()
-        armStreamWatchdog(after: Self.recoveryResponseTimeout, recoveryRequestAlreadySent: true)
-    }
-
-    private func noteValidDataFrame() {
-        let now = Date()
-        stateLock.lock()
-        lastValidDataFrameAt = now
-        let shouldRearm = lastWatchdogArmAt.map {
-            now.timeIntervalSince($0) >= Self.minimumWatchdogRearmInterval
-        } ?? true
-        stateLock.unlock()
-        guard shouldRearm else { return }
-        armStreamWatchdog(
-            after: Self.expectedLiveInterval + Self.streamWatchdogGrace,
-            recoveryRequestAlreadySent: false
-        )
     }
 
     private func stopStreamWatchdog() {
-        // Do not create a weak reference to `self` here. This method is also
-        // called from deinit, where objc_initWeak aborts because the object is
-        // already being destroyed. Capture only the timer for deferred
-        // invalidation so teardown never retains or weak-registers `self`.
-        let timer = streamWatchdogTimer
-        streamWatchdogTimer = nil
-        if Thread.isMainThread {
-            timer?.invalidate()
-        } else {
-            DispatchQueue.main.async {
-                timer?.invalidate()
-            }
-        }
+        streamWatchdogGeneration &+= 1
+        streamWatchdogWorkItem?.cancel()
+        streamWatchdogWorkItem = nil
     }
 
     private func logAdvertisementOnce(peripheral: CBPeripheral, advertisementData: [String: Any]) {
@@ -445,8 +442,13 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
                 trace("SIBIONICS Chinese: rejected malformed/checksum frame", log: log, category: ConstantsLog.categoryBlueToothTransmitter, type: .error)
                 continue
             }
-            if process(entries: entries, receivedAt: Date()) {
-                noteValidDataFrame()
+            // Transport health must be recorded even for duplicate/history
+            // frames, before algorithm work or main-thread publication.
+            guard !entries.isEmpty else { continue }
+            streamRecovery.didReceiveFrame(at: ProcessInfo.processInfo.systemUptime)
+            let receivedAt = Date()
+            processingQueue.async { [weak self] in
+                self?.process(entries: entries, receivedAt: receivedAt)
             }
         }
     }
@@ -648,19 +650,22 @@ final class CGMSibionicsChineseTransmitter: BluetoothTransmitter, CGMTransmitter
             expectedIndex,
             receivedIndex
         )
-        requestNewReading()
-
         // The first request can legitimately be inside the normal ten-second
         // write throttle. Retry once after it expires, but only if the expected
-        // row has not arrived in the meantime.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.minimumRequestSpacing) { [weak self] in
+        // row has not arrived and this is still the same BLE connection.
+        runOnCentralQueue { [weak self] in
             guard let self = self else { return }
-            self.stateLock.lock()
-            let isStillMissing = self.pendingGapRecoveryIndex == expectedIndex
-                && self.nextIndex == expectedIndex
-            self.stateLock.unlock()
-            guard isStillMissing else { return }
-            self.requestNewReading()
+            let generation = self.streamRecovery.connectionGeneration
+            self.sendReadingRequest(requireStaleStream: false)
+            self.runOnCentralQueue(after: SibionicsChineseRecoveryState.minimumRequestSpacing) { [weak self] in
+                guard let self, self.streamRecovery.connectionGeneration == generation else { return }
+                self.stateLock.lock()
+                let isStillMissing = self.pendingGapRecoveryIndex == expectedIndex
+                    && self.nextIndex == expectedIndex
+                self.stateLock.unlock()
+                guard isStillMissing else { return }
+                self.sendReadingRequest(requireStaleStream: false)
+            }
         }
     }
 

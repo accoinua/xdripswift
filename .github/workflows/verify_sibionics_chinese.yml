@@ -38,6 +38,14 @@ jobs:
       - name: Verify Chinese SIBIONICS V115G bundle
         run: node Tools/SibionicsV115G/verify-bundle.js
 
+      - name: Verify SIBIONICS reconnect and watchdog regressions
+        run: |
+          swiftc \
+            xDrip/BluetoothTransmitter/CGM/Sibionics/SibionicsChineseRecoveryState.swift \
+            Tools/SibionicsV115G/RecoveryTests/main.swift \
+            -o "$RUNNER_TEMP/sibionics-recovery-tests"
+          "$RUNNER_TEMP/sibionics-recovery-tests"
+
       - name: Resolve Swift packages
         run: |
           xcodebuild -resolvePackageDependencies \

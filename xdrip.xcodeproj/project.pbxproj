@@ -10,6 +10,7 @@
 		9A52000131A5000100C0DE01 /* SibionicsV115GAlgorithm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000131A5000100C0DE01 /* SibionicsV115GAlgorithm.swift */; };
 		9A52000231A5000100C0DE01 /* SibionicsChineseProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000231A5000100C0DE01 /* SibionicsChineseProtocol.swift */; };
 		9A52000331A5000100C0DE01 /* CGMSibionicsChineseTransmitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000331A5000100C0DE01 /* CGMSibionicsChineseTransmitter.swift */; };
+		9A52000D31A5000100C0DE01 /* SibionicsChineseRecoveryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000D31A5000100C0DE01 /* SibionicsChineseRecoveryState.swift */; };
 		9A52000431A5000100C0DE01 /* sibionics-v115g.js in Resources */ = {isa = PBXBuildFile; fileRef = 9A51000431A5000100C0DE01 /* sibionics-v115g.js */; };
 		9A52000531A5000100C0DE01 /* Sibionics+CoreDataClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000531A5000100C0DE01 /* Sibionics+CoreDataClass.swift */; };
 		9A52000631A5000100C0DE01 /* Sibionics+CoreDataProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A51000631A5000100C0DE01 /* Sibionics+CoreDataProperties.swift */; };
@@ -1011,6 +1012,7 @@
 		9A51000131A5000100C0DE01 /* SibionicsV115GAlgorithm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/BluetoothTransmitter/CGM/Sibionics/SibionicsV115GAlgorithm.swift"; sourceTree = SOURCE_ROOT; };
 		9A51000231A5000100C0DE01 /* SibionicsChineseProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/BluetoothTransmitter/CGM/Sibionics/SibionicsChineseProtocol.swift"; sourceTree = SOURCE_ROOT; };
 		9A51000331A5000100C0DE01 /* CGMSibionicsChineseTransmitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/BluetoothTransmitter/CGM/Sibionics/CGMSibionicsChineseTransmitter.swift"; sourceTree = SOURCE_ROOT; };
+		9A51000D31A5000100C0DE01 /* SibionicsChineseRecoveryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/BluetoothTransmitter/CGM/Sibionics/SibionicsChineseRecoveryState.swift"; sourceTree = SOURCE_ROOT; };
 		9A51000431A5000100C0DE01 /* sibionics-v115g.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "xDrip/BluetoothTransmitter/CGM/Sibionics/Resources/sibionics-v115g.js"; sourceTree = SOURCE_ROOT; };
 		9A51000531A5000100C0DE01 /* Sibionics+CoreDataClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/Core Data/classes/Sibionics+CoreDataClass.swift"; sourceTree = SOURCE_ROOT; };
 		9A51000631A5000100C0DE01 /* Sibionics+CoreDataProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "xDrip/Core Data/classes/Sibionics+CoreDataProperties.swift"; sourceTree = SOURCE_ROOT; };
@@ -3446,6 +3448,7 @@
 				9A51000131A5000100C0DE01 /* SibionicsV115GAlgorithm.swift */,
 				9A51000231A5000100C0DE01 /* SibionicsChineseProtocol.swift */,
 				9A51000331A5000100C0DE01 /* CGMSibionicsChineseTransmitter.swift */,
+				9A51000D31A5000100C0DE01 /* SibionicsChineseRecoveryState.swift */,
 				9A51000431A5000100C0DE01 /* sibionics-v115g.js */,
 				9A51000531A5000100C0DE01 /* Sibionics+CoreDataClass.swift */,
 				9A51000631A5000100C0DE01 /* Sibionics+CoreDataProperties.swift */,
@@ -4869,6 +4872,7 @@
 			files = (
 				9A52000131A5000100C0DE01 /* SibionicsV115GAlgorithm.swift in Sources */,
 				9A52000231A5000100C0DE01 /* SibionicsChineseProtocol.swift in Sources */,
+				9A52000D31A5000100C0DE01 /* SibionicsChineseRecoveryState.swift in Sources */,
 				9A52000331A5000100C0DE01 /* CGMSibionicsChineseTransmitter.swift in Sources */,
 				9A52000531A5000100C0DE01 /* Sibionics+CoreDataClass.swift in Sources */,
 				9A52000631A5000100C0DE01 /* Sibionics+CoreDataProperties.swift in Sources */,

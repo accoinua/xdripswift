@@ -63,10 +63,16 @@ xDrip requests the exact missing row without resetting valid algorithm state.
 A recovered row whose corrected display value clamps to zero is consumed and
 checkpointed, but is not published as a false 0 mg/dL glucose reading.
 
-Chinese GS1 is request/response based. xDrip polls every 60 seconds while it is
-running. Because iOS may suspend ordinary timers in the background, configure
-one of xDrip's supported **HeartBeat** peripherals if uninterrupted background
-polling is required; a heartbeat now explicitly triggers a Chinese GS1 request.
+After a start/history request, Chinese GS1 pushes one-minute readings through
+BLE notifications. Every new/restored connection starts the stream directly
+from the Bluetooth callback queue once FF31 notifications and FF32 are ready;
+the previous connection's request throttle cannot suppress that startup.
+A quiet watchdog rechecks the latest transport activity before recovery or
+disconnecting. Valid history/duplicate frames also cancel an unanswered-recovery
+deadline. Timing uses monotonic uptime and delayed work is scoped to a connection.
+Because iOS can suspend timers, a watchdog alone cannot wake a completely silent
+connection. A supported **HeartBeat** peripheral is an additional wake source;
+its callbacks request SIBIONICS data only when the stream is stale.
 The lifetime display uses the approximately 24-day extended Chinese operating
 window rather than the 14-day vendor-rated duration. The generic xDrip Libre
 warm-up gate is disabled for Chinese GS1; valid sensor rows are available
@@ -89,6 +95,11 @@ immediately.
 - A physical-sensor regression in which recovered index 837 repeatedly produced
   a non-publishable zero was fixed without skipping algorithm state or sending
   zero glucose to Trio.
+- The reconnect/watchdog tests reproduce the October 26-27 log timings: fast
+  reconnect after 6.659/7.737 seconds, history responses during recovery, and a
+  live response 9.681 seconds after a request. They exercise the production
+  recovery state used by the transmitter. A new physical-device background run
+  is still required to measure the improvement after installation.
 
 The parity checks establish deterministic equivalence to the recovered managed
 source for the tested inputs, and the direct iOS path has processed real
